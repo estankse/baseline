@@ -123,8 +123,8 @@ def run_epoch(model, loader, criterion, optimizer, scheduler, device,
                 optimizer.zero_grad()
                 loss.backward()
                 nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
-                optimizer.step()
                 scheduler.step()
+                optimizer.step()
 
             n_tokens = (tgt_out != 0).sum().item()
             total_loss   += loss.item() * n_tokens
