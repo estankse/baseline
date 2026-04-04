@@ -15,8 +15,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from model import Transformer
-from data import get_dataloaders, build_masks
+from model import Transformer, DecoderOnlyTransformer
+from data import get_dataloaders, get_lm_dataloaders, build_masks
 
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s | %(levelname)s | %(message)s',
@@ -126,6 +126,7 @@ def run_epoch(model, loader, criterion, optimizer, scheduler, device,
                 scheduler.step()
                 optimizer.step()
 
+
             n_tokens = (tgt_out != 0).sum().item()
             total_loss   += loss.item() * n_tokens
             total_tokens += n_tokens
@@ -134,6 +135,42 @@ def run_epoch(model, loader, criterion, optimizer, scheduler, device,
     avg_loss = total_loss / max(total_tokens, 1)
     ppl = math.exp(min(avg_loss, 100))
     tps = total_tokens / elapsed       # tokens per second
+    return avg_loss, ppl, tps
+
+
+def run_epoch_lm(model, loader, criterion, optimizer, scheduler, device,
+                 train=True, grad_clip=1.0, pad_idx=0):
+    model.train() if train else model.eval()
+    total_loss, total_tokens = 0.0, 0
+    t0 = time.time()
+
+    ctx = torch.enable_grad() if train else torch.no_grad()
+    with ctx:
+        for batch in loader:
+            batch = batch.to(device)  # [B, T+1]
+
+            x = batch[:, :-1]
+            y = batch[:, 1:]
+
+            logits = model(x)
+            B, T, V = logits.shape
+            loss = criterion(logits.reshape(-1, V), y.reshape(-1))
+
+            if train:
+                optimizer.zero_grad()
+                loss.backward()
+                nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+                scheduler.step()
+                optimizer.step()
+
+            n_tokens = (y != pad_idx).sum().item()
+            total_loss += loss.item() * n_tokens
+            total_tokens += n_tokens
+
+    elapsed = time.time() - t0
+    avg_loss = total_loss / max(total_tokens, 1)
+    ppl = math.exp(min(avg_loss, 100))
+    tps = total_tokens / elapsed
     return avg_loss, ppl, tps
 
 @torch.no_grad()
@@ -272,11 +309,35 @@ def measure_latency(model, src_vocab, device, seq_len=32, batch_sizes=(1, 32), n
     return results
 
 
+@torch.no_grad()
+def measure_latency_lm(model, vocab_size, device, seq_len=32, batch_sizes=(1, 32), n_runs=50):
+    model.eval()
+    results = {}
+    for bs in batch_sizes:
+        x = torch.randint(1, vocab_size, (bs, seq_len), device=device)
+
+        for _ in range(5):
+            _ = model(x)
+        if device.type == 'cuda':
+            torch.cuda.synchronize()
+
+        t0 = time.perf_counter()
+        for _ in range(n_runs):
+            _ = model(x)
+        if device.type == 'cuda':
+            torch.cuda.synchronize()
+        elapsed_ms = (time.perf_counter() - t0) / n_runs * 1000
+        results[f'latency_ms_bs{bs}'] = round(elapsed_ms, 2)
+    return results
+
+
 # ──────────────────────────────────────────
 # Main
 # ──────────────────────────────────────────
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument('--task',        type=str,   default='lm', choices=['mt', 'lm'])
+    parser.add_argument('--dataset',     type=str,   default='wikitext-103')
     parser.add_argument('--K',           type=int,   default=4)
     parser.add_argument('--seed',        type=int,   default=42)
     parser.add_argument('--epochs',      type=int,   default=20)
@@ -287,7 +348,13 @@ def main():
     parser.add_argument('--dropout',     type=float, default=0.1)
     parser.add_argument('--warmup',      type=int,   default=4000)
     parser.add_argument('--max_len',     type=int,   default=128)
+    parser.add_argument('--lr',          type=float, default=1.0)
+    parser.add_argument('--label_smoothing', type=float, default=0.1)
+    parser.add_argument('--train_samples', type=int, default=200000)
+    parser.add_argument('--val_samples',   type=int, default=0)
     parser.add_argument('--out_dir',     type=str,   default='results')
+    parser.add_argument('--attn_pattern', type=str,  default='alternating')
+    parser.add_argument('--sparse_window', type=int, default=128)
     args = parser.parse_args()
 
     # reproducibility
@@ -296,29 +363,52 @@ def main():
         torch.cuda.manual_seed_all(args.seed)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    logger.info(f"Device: {device} | K={args.K} | seed={args.seed}")
+    logger.info(f"Device: {device} | task={args.task} | K={args.K} | seed={args.seed}")
 
     # ── data ──
-    train_loader, val_loader, src_vocab, tgt_vocab, src_tok, tgt_tok = \
-        get_dataloaders(args.batch_size, args.max_len)
+    val_samples = args.val_samples if args.val_samples and args.val_samples > 0 else None
+    if args.task == "lm":
+        train_loader, val_loader, vocab_size, tok = get_lm_dataloaders(
+            args.batch_size, args.max_len,
+            train_samples=args.train_samples, val_samples=val_samples,
+            dataset_name=args.dataset
+        )
+        src_vocab = vocab_size
+        tgt_vocab = vocab_size
+        src_tok = tok
+        tgt_tok = tok
+    else:
+        train_loader, val_loader, src_vocab, tgt_vocab, src_tok, tgt_tok = \
+            get_dataloaders(args.batch_size, args.max_len,
+                            train_samples=args.train_samples, val_samples=val_samples)
 
     # ── model ──
-    model = Transformer(
-        src_vocab=src_vocab, tgt_vocab=tgt_vocab,
-        d_model=args.d_model, n_heads=args.n_heads,
-        n_layers=args.n_layers, K=args.K,
-        dropout=args.dropout, max_len=args.max_len
-    ).to(device)
+    if args.task == "lm":
+        model = DecoderOnlyTransformer(
+            vocab_size=tgt_vocab,
+            d_model=args.d_model, n_heads=args.n_heads,
+            n_layers=args.n_layers, K=args.K,
+            dropout=args.dropout, max_len=args.max_len,
+            pad_idx=0, attn_pattern=args.attn_pattern,
+            sparse_window=args.sparse_window
+        ).to(device)
+    else:
+        model = Transformer(
+            src_vocab=src_vocab, tgt_vocab=tgt_vocab,
+            d_model=args.d_model, n_heads=args.n_heads,
+            n_layers=args.n_layers, K=args.K,
+            dropout=args.dropout, max_len=args.max_len
+        ).to(device)
 
     n_params     = model.count_parameters()
     n_ffn_params = model.count_ffn_parameters()
     logger.info(f"Total params: {n_params:,}  |  FFN params: {n_ffn_params:,}")
 
     # ── optimizer ──
-    optimizer = optim.Adam(model.parameters(), lr=1.0,
+    optimizer = optim.Adam(model.parameters(), lr=args.lr,
                            betas=(0.9, 0.98), eps=1e-9)
     scheduler = WarmupInvSqrtScheduler(optimizer, args.d_model, args.warmup)
-    criterion = LabelSmoothingLoss(tgt_vocab, pad_idx=0, smoothing=0.1)
+    criterion = LabelSmoothingLoss(tgt_vocab, pad_idx=0, smoothing=args.label_smoothing)
 
     # ── measure baseline GPU memory ──
     reset_peak_memory()
@@ -332,32 +422,39 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
 
     for epoch in range(1, args.epochs + 1):
-        train_loss, train_ppl, train_tps = run_epoch(
-            model, train_loader, criterion, optimizer, scheduler, device, train=True)
-        val_loss, val_ppl, val_tps = run_epoch(
-            model, val_loader, criterion, optimizer, scheduler, device, train=False)
+        if args.task == "lm":
+            train_loss, train_ppl, train_tps = run_epoch_lm(
+                model, train_loader, criterion, optimizer, scheduler, device, train=True)
+            val_loss, val_ppl, val_tps = run_epoch_lm(
+                model, val_loader, criterion, optimizer, scheduler, device, train=False)
+        else:
+            train_loss, train_ppl, train_tps = run_epoch(
+                model, train_loader, criterion, optimizer, scheduler, device, train=True)
+            val_loss, val_ppl, val_tps = run_epoch(
+                model, val_loader, criterion, optimizer, scheduler, device, train=False)
         peak_mem = gpu_memory_mb()
 
         bleu = None
-        if epoch % 1 == 0 or epoch == args.epochs:
+        if args.task == "mt" and (epoch % 1 == 0 or epoch == args.epochs):
             bleu = compute_bleu(model, val_loader, src_tok, tgt_tok, device,
                                 max_batches=50)
             logger.info(f"Epoch {epoch:02d} | BLEU={bleu}")
 
+        # row = dict(epoch=epoch, K=args.K, seed=args.seed,
+        #            train_ppl=round(train_ppl, 2),
+        #            val_ppl=round(val_ppl, 2),
+        #            bleu=bleu,
+        #            train_tps=round(train_tps, 0),
+        #            peak_mem_mb=round(peak_mem, 1))
+
         row = dict(epoch=epoch, K=args.K, seed=args.seed,
+                   train_loss=round(train_loss, 4),
                    train_ppl=round(train_ppl, 2),
+                   val_loss=round(val_loss, 4),
                    val_ppl=round(val_ppl, 2),
                    bleu=bleu,
                    train_tps=round(train_tps, 0),
                    peak_mem_mb=round(peak_mem, 1))
-
-        # row = dict(epoch=epoch, K=args.K, seed=args.seed,
-        #            train_loss=round(train_loss, 4),
-        #            train_ppl=round(train_ppl, 2),
-        #            val_loss=round(val_loss, 4),
-        #            val_ppl=round(val_ppl, 2),
-        #            train_tps=round(train_tps, 0),
-        #            peak_mem_mb=round(peak_mem, 1))
         history.append(row)
 
         logger.info(
@@ -374,7 +471,10 @@ def main():
     # ── latency benchmark ──
     if best_ckpt:
         model.load_state_dict(torch.load(best_ckpt))
-    latency = measure_latency(model, src_vocab, device, seq_len=32)
+    if args.task == "lm":
+        latency = measure_latency_lm(model, src_vocab, device, seq_len=32)
+    else:
+        latency = measure_latency(model, src_vocab, device, seq_len=32)
 
     # ── save results ──
     summary = dict(
@@ -382,6 +482,8 @@ def main():
         n_params=n_params, n_ffn_params=n_ffn_params,
         d_ff=args.K * args.d_model,
         best_val_ppl=round(best_val_ppl, 2),
+        task=args.task,
+        attn_pattern=args.attn_pattern if args.task == "lm" else "softmax",
         **latency,
         history=history
     )

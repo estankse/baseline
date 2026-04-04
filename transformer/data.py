@@ -6,6 +6,7 @@ If you don't have the full WMT14, falls back to a smaller
 Multi30k dataset so you can test on a laptop.
 """
 from functools import partial
+import math
 
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -27,6 +28,14 @@ def build_masks(src, tgt, pad_idx=0):
     tgt_mask = pad_mask & causal.unsqueeze(0).unsqueeze(0)
 
     return src_mask, tgt_mask
+
+
+def build_lm_masks(tgt, pad_idx=0):
+    """Build padding mask and causal mask for LM."""
+    pad_mask = (tgt != pad_idx)  # [B, T]
+    T = tgt.size(1)
+    causal = torch.tril(torch.ones(T, T, device=tgt.device)).bool()
+    return pad_mask, causal
 
 
 class TranslationDataset(Dataset):
@@ -73,6 +82,28 @@ class TranslationDataset(Dataset):
                torch.tensor(tgt_ids, dtype=torch.long)
 
 
+class LanguageModelingDataset(Dataset):
+    """
+    Blocks of token ids for decoder-only LM.
+    Each item is a fixed-length tensor [block_size].
+    """
+    def __init__(self, tokens, block_size, pad_idx=0):
+        self.tokens = tokens
+        self.block = block_size
+        self.pad_idx = pad_idx
+
+    def __len__(self):
+        return math.ceil(len(self.tokens) / self.block)
+
+    def __getitem__(self, idx):
+        start = idx * self.block
+        end = start + self.block
+        block = self.tokens[start:end]
+        if len(block) < self.block:
+            block = block + [self.pad_idx] * (self.block - len(block))
+        return torch.tensor(block, dtype=torch.long)
+
+
 def collate_fn(batch, pad_idx=0):
     src_batch, tgt_batch = zip(*batch)
     src_pad = pad_sequence(src_batch, batch_first=True, padding_value=pad_idx)
@@ -80,7 +111,7 @@ def collate_fn(batch, pad_idx=0):
     return src_pad, tgt_pad
 
 
-def get_dataloaders(batch_size=64, max_len=128, num_workers=2):
+def get_dataloaders(batch_size=64, max_len=128, num_workers=2, train_samples=200000, val_samples=None):
     """
     Download and prepare WMT14 En-De.
     Falls back to multi30k if WMT14 isn't available.
@@ -92,6 +123,7 @@ def get_dataloaders(batch_size=64, max_len=128, num_workers=2):
     import os, tempfile
 
     logger.info("Loading dataset...")
+
     # try:
     #     ds = load_dataset("wmt14", "de-en", split={'train': 'train', 'validation': 'validation'})
     #     logger.info("Using WMT14 en-de")
@@ -100,7 +132,9 @@ def get_dataloaders(batch_size=64, max_len=128, num_workers=2):
     #     logger.warning("WMT14 not available, falling back to multi30k")
     #     ds = load_dataset("bentrevett/multi30k", split={'train': 'train', 'validation': 'validation'})
 
-    ds = load_dataset("opus100", "de-en", split={'train': 'train[:200000]', 'validation': 'validation'})
+    train_split = f"train[:{train_samples}]" if train_samples else "train"
+    val_split = f"validation[:{val_samples}]" if val_samples else "validation"
+    ds = load_dataset("opus100", "de-en", split={'train': train_split, 'validation': val_split})
 
 
     src_lang, tgt_lang = 'en', 'de'
@@ -148,3 +182,74 @@ def get_dataloaders(batch_size=64, max_len=128, num_workers=2):
                               pin_memory=True)
 
     return train_loader, val_loader, src_vocab, tgt_vocab, src_tok, tgt_tok
+
+
+def get_lm_dataloaders(batch_size=64, max_len=128, num_workers=2,
+                       dataset_name="wikitext-103", train_samples=None, val_samples=None):
+    """
+    Load WikiText-103 or TinyShakespeare for decoder-only LM.
+    Returns (train_loader, val_loader, vocab_size, tokenizer).
+    """
+    from datasets import load_dataset
+    from tokenizers import ByteLevelBPETokenizer
+    import os, tempfile
+
+    logger.info(f"Loading LM dataset: {dataset_name}")
+
+    if dataset_name.lower() in ("wikitext-103", "wikitext103", "wikitext"):
+        ds = load_dataset("wikitext", "wikitext-103-raw-v1")
+        text_field = "text"
+    elif dataset_name.lower() in ("tinyshakespeare", "tiny_shakespeare", "shakespeare"):
+        ds = load_dataset("tiny_shakespeare")
+        text_field = "text"
+    else:
+        raise ValueError(f"Unknown dataset_name: {dataset_name}")
+
+    if "validation" not in ds:
+        ds = ds["train"].train_test_split(test_size=0.05, seed=42)
+        ds = {"train": ds["train"], "validation": ds["test"]}
+
+    if train_samples:
+        ds["train"] = ds["train"].select(range(min(train_samples, len(ds["train"]))))
+    if val_samples:
+        ds["validation"] = ds["validation"].select(range(min(val_samples, len(ds["validation"]))))
+
+    tmp = tempfile.mkdtemp()
+    corpus_path = os.path.join(tmp, "lm.txt")
+    with open(corpus_path, "w", encoding="utf-8") as f:
+        for item in ds["train"]:
+            line = item[text_field]
+            f.write(line.strip() + "\n")
+
+    logger.info("Training LM BPE tokenizer...")
+    tok = ByteLevelBPETokenizer()
+    tok.train([corpus_path], vocab_size=8000, min_frequency=2,
+              special_tokens=["<pad>", "<s>", "</s>", "<unk>"])
+
+    tok.enable_padding(pad_id=0, pad_token="<pad>")
+    pad_id = tok.token_to_id("<pad>")
+    eos_id = tok.token_to_id("</s>")
+
+    def _encode_split(split_data):
+        tokens = []
+        for item in split_data:
+            text = item[text_field]
+            if not text:
+                continue
+            ids = tok.encode(text).ids
+            tokens.extend(ids + [eos_id])
+        return tokens
+
+    train_tokens = _encode_split(ds["train"])
+    val_tokens = _encode_split(ds["validation"])
+
+    block_size = max_len + 1  # input + next token
+    train_ds = LanguageModelingDataset(train_tokens, block_size, pad_idx=pad_id)
+    val_ds = LanguageModelingDataset(val_tokens, block_size, pad_idx=pad_id)
+
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True,
+                              num_workers=num_workers, pin_memory=True)
+    val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False,
+                            num_workers=num_workers, pin_memory=True)
+
+    return train_loader, val_loader, tok.get_vocab_size(), tok
