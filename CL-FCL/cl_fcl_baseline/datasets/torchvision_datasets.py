@@ -31,10 +31,29 @@ def build_torchvision_dataset(
             "torchvision is required for MNIST/CIFAR datasets. Install torchvision to use this option."
         ) from exc
 
-    transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize((0.1307,), (0.3081,))  # MNIST 官方给出的全局均值和标准差
-    ])
+    if key == "mnist":
+        transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.1307,), (0.3081,)),  # MNIST official mean/std.
+        ])
+    elif key == "cifar10":
+        mean = (0.4914, 0.4822, 0.4465)
+        std = (0.2023, 0.1994, 0.2010)
+        if train:
+            transform = transforms.Compose([
+                transforms.RandomCrop(32, padding=4),
+                transforms.RandomHorizontalFlip(),
+                transforms.ToTensor(),
+                transforms.Normalize(mean, std),
+            ])
+        else:
+            transform = transforms.Compose([
+                transforms.ToTensor(),
+                transforms.Normalize(mean, std),
+            ])
+    else:
+        raise ValueError(f"Unsupported torchvision dataset: {name}")
+
     root = Path(data_dir)
     if key == "mnist":
         dataset: Dataset = datasets.MNIST(root=str(root), train=train, download=True, transform=transform)

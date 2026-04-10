@@ -4,6 +4,7 @@ from typing import Iterable, List, Sequence
 
 import torch
 from torch.utils.data import DataLoader, Dataset, Subset
+import numpy as np
 
 
 class RandomClassificationDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
@@ -121,4 +122,49 @@ def partition_dataset_noniid(
             shard_id = permutation[client_idx * num_shards + j]
             assigned.extend(shard_indices[shard_id])
         client_partitions.append(Subset(dataset, assigned))
+    return client_partitions
+
+
+def partition_dataset_dirichlet(
+        dataset: Dataset,
+        num_clients: int,
+        beta: float = 0.1,
+        num_classes: int = 10,
+        seed: int = 0
+) -> List[Subset]:
+    np.random.seed(seed)
+
+    # 提取所有数据的标签并记录原始索引
+    # 假设 dataset 可以通过索引访问，且返回 (data, label)
+    labels = np.array([dataset[i][1] for i in range(len(dataset))])
+
+    # 记录每个客户端分到的数据索引
+    client_indices = {i: [] for i in range(num_clients)}
+
+    # 对每一个类别，利用狄利克雷分布计算将其分配给各个客户端的比例
+    for k in range(num_classes):
+        # 找出属于类别 k 的所有数据的索引
+        idx_k = np.where(labels == k)[0]
+        np.random.shuffle(idx_k)  # 打乱该类别的索引
+
+        # 生成基于 beta 的狄利克雷分布比例 (长度为 num_clients)
+        # proportion 的和为 1，例如 [0.05, 0.9, ..., 0.01]
+        proportions = np.random.dirichlet(np.repeat(beta, num_clients))
+
+        # 将比例转换为具体的数据量
+        # 为防止某个客户端分不到数据，加一个小小的偏移量
+        proportions = np.array(
+            [p * (len(idx_j) < len(labels) / num_clients) for p, idx_j in zip(proportions, client_indices.values())])
+        proportions = proportions / proportions.sum()
+
+        # 计算切分点
+        split_points = (np.cumsum(proportions) * len(idx_k)).astype(int)[:-1]
+
+        # 将该类别的数据按切分点分给各个客户端
+        split_idx = np.split(idx_k, split_points)
+        for client_id, indices in enumerate(split_idx):
+            client_indices[client_id].extend(indices.tolist())
+
+    # 将索引转化为 Subset 列表
+    client_partitions = [Subset(dataset, indices) for indices in client_indices.values()]
     return client_partitions

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional, Sequence
+from typing import Optional, Sequence, Tuple
 
 import torch
 from torch import nn
@@ -39,8 +39,9 @@ class MLPClassifier(nn.Module):
 
 
 class SimpleCNN(nn.Module):
-    def __init__(self, input_channels: int = 1, num_classes: int = 10) -> None:
+    def __init__(self, input_shape: Tuple[int, int, int], num_classes: int = 10) -> None:
         super().__init__()
+        input_channels, height, width = input_shape
         self.features = nn.Sequential(
             nn.Conv2d(input_channels, 32, kernel_size=5, padding=2),
             nn.ReLU(),
@@ -48,13 +49,20 @@ class SimpleCNN(nn.Module):
             nn.Conv2d(32, 64, kernel_size=5, padding=2),
             nn.ReLU(),
             nn.MaxPool2d(kernel_size=2),
+
+        )
+        dummy_input = torch.zeros(1, input_channels, height, width)
+        with torch.no_grad():
+            dummy_output = self.features(dummy_input)
+            linear_input_size = dummy_output.numel()
+        self.fc_features = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(7 * 7 * 64, 512),
+            nn.Linear(linear_input_size, 512),
             nn.ReLU(),
         )
         self.classifier = nn.Linear(512, num_classes)
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
         features = self.features(inputs)
-        # features = torch.flatten(features, start_dim=1)
+        features = self.fc_features(features)
         return self.classifier(features)

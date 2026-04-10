@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import json
+import random
 from typing import Callable, Dict, List, Mapping, Optional, Sequence
 
 import torch
@@ -77,6 +79,11 @@ class FCLServer:
     model: torch.nn.Module
     clients: Sequence[ContinualClient]
     aggregator: FedAvgAggregator = field(default_factory=FedAvgAggregator)
+    client_sample_ratio: float = 1.0
+
+    def __post_init__(self) -> None:
+        if not (0.0 < float(self.client_sample_ratio) <= 1.0):
+            raise ValueError("client_sample_ratio must be in (0, 1].")
 
     def get_global_state(self) -> Dict[str, torch.Tensor]:
         return detach_state_dict(self.model.state_dict())
@@ -87,7 +94,11 @@ class FCLServer:
     def run_round(self, round_idx: int, task_id: str) -> AggregationResult:
         global_state = self.get_global_state()
         client_results: List[TrainResult] = []
-        for client in self.clients:
+        clients = list(self.clients)
+        if clients and self.client_sample_ratio < 1.0:
+            num_selected = max(1, int(len(clients) * self.client_sample_ratio))
+            clients = random.sample(clients, k=num_selected)
+        for client in clients:
             context = ClientContext(client_id=client.client_id, round_idx=round_idx, task_id=task_id)
             client_results.append(client.fit(global_state, context))
         aggregation_result = self.aggregator.aggregate(client_results)
@@ -113,17 +124,32 @@ class FCLExperiment:
     log_each_round: bool = False
     eval_every: int | None = None
     eval_fn: Callable[[str, int], None] | None = None
+    log_path: str | None = None
 
     def run(self) -> List[AggregationResult]:
-        for task in self.tasks:
-            self.strategy.on_task_start(task)
-            for round_idx in range(self.rounds_per_task):
-                result = self.server.run_round(round_idx, task.task_id)
-                self.history.append(result)
-                if self.log_each_round:
-                    print(f"task={task.task_id} round={round_idx} metrics={result.metrics}")
-                if self.eval_fn is not None and self.eval_every:
-                    if round_idx % int(self.eval_every) == 0:
-                        self.eval_fn(task.task_id, round_idx)
-            self.strategy.on_task_end(task)
+        log_handle = open(self.log_path, "a", encoding="utf-8") if self.log_path else None
+        try:
+            for task in self.tasks:
+                self.strategy.on_task_start(task)
+                for round_idx in range(self.rounds_per_task):
+                    result = self.server.run_round(round_idx, task.task_id)
+                    self.history.append(result)
+                    if self.log_each_round:
+                        print(f"task={task.task_id} round={round_idx} metrics={result.metrics}")
+                    if log_handle is not None:
+                        record = {
+                            "type": "train",
+                            "task_id": task.task_id,
+                            "round": round_idx,
+                            "metrics": dict(result.metrics),
+                        }
+                        log_handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+                        log_handle.flush()
+                    if self.eval_fn is not None and self.eval_every:
+                        if round_idx % int(self.eval_every) == 0:
+                            self.eval_fn(task.task_id, round_idx)
+                self.strategy.on_task_end(task)
+        finally:
+            if log_handle is not None:
+                log_handle.close()
         return self.history
