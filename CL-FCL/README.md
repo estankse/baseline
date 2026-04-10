@@ -9,7 +9,7 @@ The code intentionally avoids:
 
 Everything is created directly in Python so the flow is easy to read and edit.
 
-**What��s included**
+**What's included**
 
 Federated Learning (FL)
 - `FedAvgAggregator`
@@ -70,22 +70,36 @@ Common options:
 - `--server-ensemble` `max` or `mean`
 - `--server-data-ratio` fraction of *training* data used as server public set
 
-Example (non-IID + smaller server public set):
+Example (reproducing experiments):
+
+first one:
 ```bash
 python -m cl_fcl_baseline.experiments.run_FedKEMF \
+  --seed 0\
   --dataset cifar10 \
   --model VGG11 \
-  --num-clients 10 \
+  --num-clients 30 \
   --client-sample-ratio 0.4 \
   --partition noniid \
   --noniid-method dirichlet \
-  --dirichlet-beta 0.1 \
+  --dirichlet-beta 0.5 \
   --num-rounds 200 \
-  --local_epochs 10 \
+  --distill-epochs 10 \
   --batch-size 64 \
   --lr 0.01 \
-  --server-data-ratio 0.1
+  --server-data-ratio 0.6 \
+  --optimizer sgd \
+  --algorithm fedkemf \
+  --distill-temperature 2.0 \
+  --server-ensemble max \
+  --server-distill-epochs 1 \
+  --server-distill-temperature 2.0 \
+  --server-distill-lr 0.01 \
 ```
+result:
+![FedKEMF Accuracy](CL-FCL/cl_fcl_baseline/analyse/plots/eval_accuracy.png)
+![FedKEMF Accuracy](CL-FCL/cl_fcl_baseline/analyse/plots/eval_loss.png)
+
 
 **Logs**
 
