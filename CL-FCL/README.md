@@ -97,8 +97,8 @@ python -m cl_fcl_baseline.experiments.run_FedKEMF \
   --server-distill-lr 0.01 \
 ```
 result:
-![FedKEMF Accuracy](CL-FCL/cl_fcl_baseline/analyse/plots/eval_accuracy.png)
-![FedKEMF Accuracy](CL-FCL/cl_fcl_baseline/analyse/plots/eval_loss.png)
+![FedKEMF Accuracy](cl_fcl_baseline/analyse/plots/eval_accuracy.png)
+![FedKEMF Accuracy](cl_fcl_baseline/analyse/plots/eval_loss.png)
 
 
 **Logs**
