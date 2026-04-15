@@ -245,7 +245,7 @@ python -m cl_fcl_baseline.experiments.run_FedProx
 --client-sample-ratio 0.4 \  
 --partition noniid \   
 --noniid-method dirichlet \   
---dirichlet-beta 0.5 \   
+--dirichlet-beta 0.1 \   
 --num-rounds 200 \   
 --local_epochs 10 \   
 --batch-size 64 \   
