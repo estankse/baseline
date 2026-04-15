@@ -91,7 +91,7 @@ def main() -> None:
     )[:server_size].tolist()
     server_dataset = Subset(dataset, server_indices)
     server_loader = build_dataloader(server_dataset, batch_size=args.batch_size, shuffle=True)
-
+    server_loader = build_dataloader(test_dataset, batch_size=args.batch_size, shuffle=False)
 
 
     clients = []
@@ -142,7 +142,7 @@ def main() -> None:
         distill_cfg = None
         if args.distill:
             distill_cfg = DistillationConfig(
-                epochs=args.distill_epochs,
+                epochs=args.local_epochs,
                 temperature=args.distill_temperature,
                 alpha=args.distill_alpha,
             )

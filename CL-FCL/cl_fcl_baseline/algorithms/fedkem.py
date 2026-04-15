@@ -260,11 +260,14 @@ class FedKEMServerAggregator:
             )
 
         client_states: List[StateDict] = []
+        client_sample_counts: List[int] = []
         total_samples = 0
         for result in client_results:
             payload_state = result.payload.get("model_state", {})
             if isinstance(payload_state, dict) and payload_state:
                 client_states.append(payload_state)
+                samples = max(int(result.num_samples), 0)
+                client_sample_counts.append(samples)
                 total_samples += max(int(result.num_samples), 0)
 
         if not client_states:
@@ -272,6 +275,18 @@ class FedKEMServerAggregator:
                 global_state={},
                 metrics={"num_clients": float(len(client_results)), "total_samples": 0.0},
             )
+
+        # --- 新增步骤: 联邦平均 (FedAvg) 初始化 ---
+        # 计算所有参与客户端的加权平均参数
+        avg_state = {}
+        for key in client_states[0].keys():
+            # 这里的计算是在 CPU/默认设备上进行的，确保精度
+            layer_updates = [state[key] * (count / total_samples)
+                             for state, count in zip(client_states, client_sample_counts)]
+            avg_state[key] = torch.sum(torch.stack(layer_updates), dim=0)
+
+        # 将 FedAvg 的结果加载到服务器全局模型中
+        self.model.load_state_dict(avg_state)
 
         client_models: List[nn.Module] = []
         for state in client_states:
@@ -283,15 +298,10 @@ class FedKEMServerAggregator:
 
         self.model.to(self.device)
         self.model.train()
-        if self._optimizer is None:
-            self._optimizer = torch.optim.SGD(
-                self.model.parameters(),
-                lr=float(self.lr),
-                momentum=0.9,
-                weight_decay=5e-4
-            )
+        # if self._optimizer is None:
+        #     self._optimizer = torch.optim.SGD(self.model.parameters(), lr=float(self.lr), momentum=0.9, weight_decay=5e-4)
             # self._optimizer = torch.optim.Adam(self.model.parameters(),lr=float(self.lr))
-        # optimizer = torch.optim.SGD(self.model.parameters(), lr=float(self.lr), momentum=0.9, weight_decay=5e-4)
+        optimizer = torch.optim.SGD(self.model.parameters(), lr=float(self.lr), momentum=0.9, weight_decay=5e-4)
 
         total_loss = 0.0
         total_examples = 0
@@ -312,9 +322,9 @@ class FedKEMServerAggregator:
                     reduction="batchmean",
                 ) * (temperature ** 2)
 
-                self._optimizer.zero_grad()
+                optimizer.zero_grad()
                 loss.backward()
-                self._optimizer.step()
+                optimizer.step()
 
                 batch_size = int(inputs.shape[0])
                 total_examples += batch_size

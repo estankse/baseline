@@ -2,7 +2,7 @@ import json
 import matplotlib.pyplot as plt
 import os
 
-def plots(log_text, output_dir="plots"):
+def plots(log_text, output_dir="plot-MOON"):
     # 1. 创建输出目录
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -25,7 +25,7 @@ def plots(log_text, output_dir="plots"):
 
     # 3. 定义绘图配置: (数据来源, Key, 标题, 文件名, 颜色)
     plot_configs = [
-        (train_data, 'server_distill_loss', 'Server Distill Loss', 'train_distill_loss.png', '#1f77b4'),
+        # (train_data, 'server_distill_loss', 'Server Distill Loss', 'train_distill_loss.png', '#1f77b4'),
         (eval_data, 'loss', 'Evaluation Loss', 'eval_loss.png', '#ff7f0e'),
         (eval_data, 'accuracy', 'Evaluation Accuracy', 'eval_accuracy.png', '#2ca02c')
     ]
@@ -58,5 +58,5 @@ def plots(log_text, output_dir="plots"):
         plt.close()
 
 if __name__ == "__main__":
-    with open('../experiments/logs/fedkemf_20260410_000953.jsonl', 'r') as f:
+    with open('../experiments/logs/moon_20260415_002459.jsonl', 'r') as f:
         plots(f.read())
