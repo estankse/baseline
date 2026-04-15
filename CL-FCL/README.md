@@ -1,6 +1,6 @@
 ﻿# CL-FCL Baseline
 
-A compact, explicit PyTorch baseline for **Federated Learning (FL)** and **Federated Continual Learning (FCL)**, plus implementations of **FedKEMF** (Knowledge Extraction and Multi-model Fusion style training), **FedProx**, and **MOON**.
+A compact, explicit PyTorch baseline for **Federated Learning (FL)** and **Federated Continual Learning (FCL)**, plus implementations of **FedKEMF**, **FedAvg**, **FedProx**, **Scaffold**, and **MOON**.
 
 The code intentionally avoids:
 - registries
@@ -33,8 +33,7 @@ MOON (model-contrastive federated learning)
 - `run_MOON.py`
 
 Data + Models
-- `RandomClassificationDataset`
-- `MLPClassifier`, `SimpleCNN`
+- `cifar10`, `MNIST`
 - `VGG11`, `ResNet18`, `ResNet20`, `ResNet32`
 
 
