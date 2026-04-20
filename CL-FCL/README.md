@@ -1,4 +1,4 @@
-# CL-FCL Baseline
+﻿# CL-FCL Baseline
 
 A compact, explicit PyTorch baseline for **Federated Learning (FL)** and **Federated Continual Learning (FCL)**, plus implementations of **FedKEMF**, **FedAvg**, **FedProx**, **Scaffold**, **MOON**, and **FedWeIT**.
 
@@ -105,7 +105,7 @@ python -m cl_fcl_baseline.experiments.run_FedWeIT \
   --dirichlet-beta 0.5 \
   --num-tasks 10 \
   --classes-per-task 10 \
-  --rounds-per-task 20 \
+  --rounds-per-task 40 \
   --local_epochs 10 \
   --batch-size 64 \
   --lr 0.005 \
