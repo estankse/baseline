@@ -1,6 +1,6 @@
-﻿# CL-FCL Baseline
+# CL-FCL Baseline
 
-A compact, explicit PyTorch baseline for **Federated Learning (FL)** and **Federated Continual Learning (FCL)**, plus implementations of **FedKEMF**, **FedAvg**, **FedProx**, **Scaffold**, and **MOON**.
+A compact, explicit PyTorch baseline for **Federated Learning (FL)** and **Federated Continual Learning (FCL)**, plus implementations of **FedKEMF**, **FedAvg**, **FedProx**, **Scaffold**, **MOON**, and **FedWeIT**.
 
 The code intentionally avoids:
 - registries
@@ -24,6 +24,11 @@ FedKEMF (knowledge distillation + multi-model fusion)
 - `FedKEMServerAggregator`
 - `run_FedKEMF.py`
 
+FedWeIT Federated Continual Learning
+- `FedWeITClient`
+- `FedWeITServer`
+- `run_FedWeIT.py`
+
 FedProx (proximal regularization)
 - `FedProxClient`, `FedProxTrainer`
 - `run_FedProx.py`
@@ -33,7 +38,7 @@ MOON (model-contrastive federated learning)
 - `run_MOON.py`
 
 Data + Models
-- `cifar10`, `MNIST`
+- `cifar10`, `cifar100`, `MNIST`
 - `VGG11`, `ResNet18`, `ResNet20`, `ResNet32`
 
 
@@ -63,6 +68,62 @@ Run FCL:
 ```bash
 python -m cl_fcl_baseline.experiments.run_fcl
 ```
+
+Run FedWeIT:
+```bash
+python -m cl_fcl_baseline.experiments.run_FedWeIT
+```
+
+**FedWeIT usage notes**
+
+`run_FedWeIT.py` targets the Algorithm 1 FedWeIT flow. Each client maintains `B_c`, task masks `m_c^(t)`, task-adaptive parameters `A_c^(1:t)`, and attention weights `alpha_c^(t)`. The server samples a task knowledge base, distributes it once per client/task, aggregates `B_c^(t,r) * m_c^(t,r)` by client mean, and appends client `A_c^(t)` states into `kb` at task end.
+
+Common options:
+- `--dataset` `random_classification` | `mnist` | `cifar10` | `cifar100`
+- `--num-tasks` number of continual tasks
+- `--classes-per-task` class split size for class-incremental datasets
+- `--rounds-per-task` communication rounds per task
+- `--local_epochs` local epochs per round
+- `--lambda1` FedWeIT `lambda_l1` coefficient for adaptive parameters `A`
+- `--lambda2` Eq.2 retroactive coefficient for old-task compensation
+- `--lambda-mask` FedWeIT `lambda_mask` coefficient for raw mask variables; the reference default is `0`
+- `--kb-sample-size` number of knowledge-base entries sampled per task (`<=0` means all)
+- `--client-sparsity` fraction of smallest raw-mask entries pruned from communicable `B*m`
+- `--mask-init` task-mask initialization; `<0` uses random raw-mask initialization like the reference implementation
+
+Example:
+configuration:
+```bash
+python -m cl_fcl_baseline.experiments.run_FedWeIT \
+  --dataset cifar100 \
+  --model ResNet32 \
+  --client-sample-ratio 1.0 \
+  --num-clients 5 \
+  --client-sample-ratio 0.4 \
+  --partition noniid \
+  --noniid-method dirichlet \
+  --dirichlet-beta 0.5 \
+  --num-tasks 10 \
+  --classes-per-task 10 \
+  --rounds-per-task 20 \
+  --local_epochs 10 \
+  --batch-size 64 \
+  --lr 0.005 \
+  --optimizer adam \
+  --lambda1 0.0005 \
+  --lambda2 30 \
+  --lambda-mask 0 \
+  --kb-sample-size 0 \
+  --client-sparsity 0.3 \
+  --mask-init -1.0 \
+  --adaptive-threshold -1.0 \
+```
+
+result:
+![FedWeIT](cl_fcl_baseline/analyse/plot-FedWeIT/eval_avg_global/global_avg_accuracy.png)
+![FedWeIT](cl_fcl_baseline/analyse/plot-FedWeIT/eval_avg_global/global_avg_loss.png)
+![FedWeIT](cl_fcl_baseline/analyse/plot-FedWeIT/eval_compare/all_tasks_accuracy.png)
+
 
 **FedAvg usage notes**
 
@@ -384,5 +445,3 @@ This project is a baseline for quick experiments:
 - explicit construction over configuration files
 - minimal abstractions
 - readable core logic over features
-
-

@@ -29,6 +29,31 @@ class RandomClassificationDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
         return self.features[index], self.targets[index]
 
 
+class ClassIncrementalSubset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
+    def __init__(
+        self,
+        dataset: Dataset,
+        indices: Sequence[int],
+        class_ids: Sequence[int],
+        remap_labels: bool = True,
+    ) -> None:
+        self.dataset = dataset
+        self.indices = [int(index) for index in indices]
+        self.class_ids = [int(class_id) for class_id in class_ids]
+        self.remap_labels = bool(remap_labels)
+        self.label_map = {class_id: idx for idx, class_id in enumerate(self.class_ids)}
+
+    def __len__(self) -> int:
+        return len(self.indices)
+
+    def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor]:
+        sample, target = self.dataset[self.indices[index]]
+        target_value = int(target)
+        if self.remap_labels:
+            target_value = self.label_map[target_value]
+        return sample, torch.tensor(target_value, dtype=torch.long)
+
+
 def build_dataloader(
     dataset: Dataset,
     batch_size: int = 32,
@@ -83,6 +108,60 @@ def _subset_labels(dataset: Dataset, indices: Iterable[int]) -> List[int]:
         base = dataset.dataset
     labels = _extract_labels(base)
     return [labels[int(idx)] for idx in indices]
+
+
+def build_class_incremental_tasks(
+    dataset: Dataset,
+    classes_per_task: int,
+    num_tasks: int | None = None,
+    class_order: Sequence[int] | None = None,
+    seed: int = 0,
+    shuffle_classes: bool = False,
+    remap_labels: bool = True,
+) -> List[ClassIncrementalSubset]:
+    if classes_per_task <= 0:
+        raise ValueError("classes_per_task must be positive.")
+
+    labels = _subset_labels(dataset, range(len(dataset)))
+    unique_classes = sorted(set(labels))
+    if class_order is None:
+        ordered_classes = unique_classes[:]
+        if shuffle_classes:
+            generator = torch.Generator().manual_seed(int(seed))
+            permutation = torch.randperm(len(ordered_classes), generator=generator).tolist()
+            ordered_classes = [ordered_classes[idx] for idx in permutation]
+    else:
+        ordered_classes = [int(class_id) for class_id in class_order]
+
+    if num_tasks is None or int(num_tasks) <= 0:
+        num_tasks = len(ordered_classes) // int(classes_per_task)
+
+    required_classes = int(num_tasks) * int(classes_per_task)
+    if required_classes > len(ordered_classes):
+        raise ValueError("Not enough classes to build the requested number of tasks.")
+
+    ordered_classes = ordered_classes[:required_classes]
+    label_to_indices: dict[int, list[int]] = {}
+    for sample_idx, label in enumerate(labels):
+        label_to_indices.setdefault(int(label), []).append(sample_idx)
+
+    task_datasets: List[ClassIncrementalSubset] = []
+    for task_idx in range(int(num_tasks)):
+        task_classes = ordered_classes[
+            task_idx * int(classes_per_task): (task_idx + 1) * int(classes_per_task)
+        ]
+        task_indices: List[int] = []
+        for class_id in task_classes:
+            task_indices.extend(label_to_indices.get(int(class_id), []))
+        task_datasets.append(
+            ClassIncrementalSubset(
+                dataset=dataset,
+                indices=task_indices,
+                class_ids=task_classes,
+                remap_labels=remap_labels,
+            )
+        )
+    return task_datasets
 
 
 def partition_dataset_noniid(
@@ -151,13 +230,12 @@ def partition_dataset_dirichlet(
         # proportion 的和为 1，例如 [0.05, 0.9, ..., 0.01]
         proportions = np.random.dirichlet(np.repeat(beta, num_clients))
 
-        # 将比例转换为具体的数据量
-        # 为防止某个客户端分不到数据，加一个小小的偏移量
+
         proportions = np.array(
             [p * (len(idx_j) < len(labels) / num_clients) for p, idx_j in zip(proportions, client_indices.values())])
         proportions = proportions / proportions.sum()
 
-        # 计算切分点
+
         split_points = (np.cumsum(proportions) * len(idx_k)).astype(int)[:-1]
 
         # 将该类别的数据按切分点分给各个客户端

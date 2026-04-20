@@ -13,6 +13,8 @@ def dataset_info(name: str) -> Tuple[Tuple[int, int, int], int]:
         return (1, 28, 28), 10
     if key == "cifar10":
         return (3, 32, 32), 10
+    if key == "cifar100":
+        return (3, 32, 32), 100
     raise ValueError(f"Unknown dataset: {name}")
 
 
@@ -51,6 +53,21 @@ def build_torchvision_dataset(
                 transforms.ToTensor(),
                 transforms.Normalize(mean, std),
             ])
+    elif key == "cifar100":
+        mean = (0.5071, 0.4867, 0.4408)
+        std = (0.2675, 0.2565, 0.2761)
+        if train:
+            transform = transforms.Compose([
+                transforms.RandomCrop(32, padding=4),
+                transforms.RandomHorizontalFlip(),
+                transforms.ToTensor(),
+                transforms.Normalize(mean, std),
+            ])
+        else:
+            transform = transforms.Compose([
+                transforms.ToTensor(),
+                transforms.Normalize(mean, std),
+            ])
     else:
         raise ValueError(f"Unsupported torchvision dataset: {name}")
 
@@ -59,6 +76,8 @@ def build_torchvision_dataset(
         dataset: Dataset = datasets.MNIST(root=str(root), train=train, download=True, transform=transform)
     elif key == "cifar10":
         dataset = datasets.CIFAR10(root=str(root), train=train, download=True, transform=transform)
+    elif key == "cifar100":
+        dataset = datasets.CIFAR100(root=str(root), train=train, download=True, transform=transform)
     else:
         raise ValueError(f"Unsupported torchvision dataset: {name}")
 

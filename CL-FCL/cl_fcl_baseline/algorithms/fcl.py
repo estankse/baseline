@@ -131,6 +131,9 @@ class FCLExperiment:
         try:
             for task in self.tasks:
                 self.strategy.on_task_start(task)
+                server_task_start = getattr(self.server, "on_task_start", None)
+                if callable(server_task_start):
+                    server_task_start(task)
                 for round_idx in range(self.rounds_per_task):
                     result = self.server.run_round(round_idx, task.task_id)
                     self.history.append(result)
@@ -149,6 +152,9 @@ class FCLExperiment:
                         if round_idx % int(self.eval_every) == 0:
                             self.eval_fn(task.task_id, round_idx)
                 self.strategy.on_task_end(task)
+                server_task_end = getattr(self.server, "on_task_end", None)
+                if callable(server_task_end):
+                    server_task_end(task)
         finally:
             if log_handle is not None:
                 log_handle.close()
