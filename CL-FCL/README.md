@@ -125,6 +125,46 @@ result:
 ![FedWeIT](cl_fcl_baseline/analyse/plot-FedWeIT/eval_compare/all_tasks_accuracy.png)
 
 
+with robust accuracy:
+```bash
+python -m cl_fcl_baseline.experiments.run_FedWeIT \
+  --dataset cifar100 \
+  --model ResNet32 \
+  --client-sample-ratio 1.0 \
+  --num-clients 5 \
+  --client-sample-ratio 0.4 \
+  --partition noniid \
+  --noniid-method dirichlet \
+  --dirichlet-beta 0.5 \
+  --num-tasks 10 \
+  --classes-per-task 10 \
+  --rounds-per-task 20 \
+  --local_epochs 10 \
+  --batch-size 64 \
+  --lr 0.005 \
+  --optimizer adam \
+  --lambda1 0.0005 \
+  --lambda2 30 \
+  --lambda-mask 0 \
+  --kb-sample-size 0 \
+  --client-sparsity 0.3 \
+  --mask-init -1.0 \
+  --adaptive-threshold -1.0 \
+  --pgd-epsilon 8.0/255.0 \
+  --pgd-step-size 2.0/255.0 \
+  --pgd-steps 10 \
+  --pgd-random-start True \
+  --pgd-normalized-space False \
+  --pgd-max-batches 0 \
+```
+result:
+![FedWeIT](cl_fcl_baseline/analyse/plot-FedWeIT-robust/eval_avg_global/global_avg_accuracy.png)
+![FedWeIT](cl_fcl_baseline/analyse/plot-FedWeIT-robust/eval_avg_global/global_avg_robust_accuracy.png)
+![FedWeIT](cl_fcl_baseline/analyse/plot-FedWeIT-robust/eval_compare/all_tasks_accuracy.png)
+![FedWeIT](cl_fcl_baseline/analyse/plot-FedWeIT-robust/eval_compare/all_tasks_robust_accuracy.png)
+
+
+
 **FedAvg usage notes**
 
 FedAvg is the standard federated averaging baseline: each client trains locally and the server aggregates client parameters with sample-size weighting. Important settings live in `cl_fcl_baseline/experiments/args.py` and are parsed by `run_FedAvg.py`.

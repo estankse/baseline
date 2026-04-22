@@ -132,6 +132,17 @@ def build_fedweit_parser() -> argparse.ArgumentParser:
     parser.add_argument("--input-shape", type=int, nargs=3, default=[1, 28, 28])
     return parser
 
+def _parse_fedweit_pgd_args() -> argparse.Namespace:
+    parser = build_fedweit_parser()
+    parser.description = "Run a FedWeIT baseline with PGD robust evaluation."
+    parser.add_argument("--pgd-epsilon", type=float, default=8.0 / 255.0, help="PGD L-inf radius. For normalized torchvision datasets this is interpreted in raw pixel space unless --pgd-normalized-space is set.",)
+    parser.add_argument("--pgd-step-size", type=float, default=2.0 / 255.0, help="PGD step size. For normalized torchvision datasets this is interpreted in raw pixel space unless --pgd-normalized-space is set.",)
+    parser.add_argument("--pgd-steps", type=int, default=10, help="number of PGD ascent steps")
+    parser.add_argument("--pgd-random-start", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--pgd-normalized-space", action="store_true", default=False, help="treat --pgd-epsilon and --pgd-step-size as model input-space values instead of raw pixel-space values",)
+    parser.add_argument("--pgd-max-batches", type=int, default=0, help="maximum eval batches for PGD robust testing; <=0 evaluates the full test loader",)
+    return parser.parse_args()
+
 
 def parse_fedavg_args() -> argparse.Namespace:
     return build_fedavg_parser().parse_args()
