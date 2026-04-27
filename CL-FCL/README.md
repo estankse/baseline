@@ -28,6 +28,12 @@ FedWeIT Federated Continual Learning
 - `FedWeITClient`
 - `FedWeITServer`
 - `run_FedWeIT.py`
+- `run_FedWeIT_PGD.py` adds PGD robust evaluation to FedWeIT
+- `run_FedWeIT_FAT.py` combines FedWeIT with local Federated Adversarial Training
+- `run_FedWeIT_SFAT.py` combines FedWeIT with Slack Federated Adversarial Training
+- `run_FedWeIT_CalFAT.py` combines FedWeIT with Calibrated Federated Adversarial Training
+- `run_FedWeIT_RBN.py` combines FedWeIT with FedRBN-style local BatchNorm personalization
+- `run_FedWeIT_Sylva.py` combines FedWeIT with Sylva-inspired personalized adversarial fine-tuning
 
 FedProx (proximal regularization)
 - `FedProxClient`, `FedProxTrainer`
@@ -74,6 +80,36 @@ Run FedWeIT:
 python -m cl_fcl_baseline.experiments.run_FedWeIT
 ```
 
+Run FedWeIT-PGD:
+```bash
+python -m cl_fcl_baseline.experiments.run_FedWeIT_PGD
+```
+
+Run FedWeIT-FAT:
+```bash
+python -m cl_fcl_baseline.experiments.run_FedWeIT_FAT
+```
+
+Run FedWeIT-SFAT:
+```bash
+python -m cl_fcl_baseline.experiments.run_FedWeIT_SFAT
+```
+
+Run FedWeIT-CalFAT:
+```bash
+python -m cl_fcl_baseline.experiments.run_FedWeIT_CalFAT
+```
+
+Run FedWeIT-RBN:
+```bash
+python -m cl_fcl_baseline.experiments.run_FedWeIT_RBN
+```
+
+Run FedWeIT-Sylva:
+```bash
+python -m cl_fcl_baseline.experiments.run_FedWeIT_Sylva
+```
+
 **FedWeIT usage notes**
 
 `run_FedWeIT.py` targets the Algorithm 1 FedWeIT flow. Each client maintains `B_c`, task masks `m_c^(t)`, task-adaptive parameters `A_c^(1:t)`, and attention weights `alpha_c^(t)`. The server samples a task knowledge base, distributes it once per client/task, aggregates `B_c^(t,r) * m_c^(t,r)` by client mean, and appends client `A_c^(t)` states into `kb` at task end.
@@ -97,7 +133,6 @@ configuration:
 python -m cl_fcl_baseline.experiments.run_FedWeIT \
   --dataset cifar100 \
   --model ResNet32 \
-  --client-sample-ratio 1.0 \
   --num-clients 5 \
   --client-sample-ratio 0.4 \
   --partition noniid \
@@ -125,12 +160,13 @@ result:
 ![FedWeIT](cl_fcl_baseline/analyse/plot-FedWeIT/eval_compare/all_tasks_accuracy.png)
 
 
+FedWeIT-PGD keeps the FedWeIT optimization flow unchanged and adds PGD robust evaluation after each task/round.
+
 with robust accuracy:
 ```bash
-python -m cl_fcl_baseline.experiments.run_FedWeIT \
+python -m cl_fcl_baseline.experiments.run_FedWeIT_PGD \
   --dataset cifar100 \
   --model ResNet32 \
-  --client-sample-ratio 1.0 \
   --num-clients 5 \
   --client-sample-ratio 0.4 \
   --partition noniid \
@@ -153,8 +189,6 @@ python -m cl_fcl_baseline.experiments.run_FedWeIT \
   --pgd-epsilon 8.0/255.0 \
   --pgd-step-size 2.0/255.0 \
   --pgd-steps 10 \
-  --pgd-random-start True \
-  --pgd-normalized-space False \
   --pgd-max-batches 0 \
 ```
 result:
@@ -163,6 +197,229 @@ result:
 ![FedWeIT](cl_fcl_baseline/analyse/plot-FedWeIT-robust/eval_compare/all_tasks_accuracy.png)
 ![FedWeIT](cl_fcl_baseline/analyse/plot-FedWeIT-robust/eval_compare/all_tasks_robust_accuracy.png)
 
+FedWeIT-FAT uses the same FedWeIT task/mask/knowledge-base flow, but each local minibatch is mixed with PGD adversarial examples before the FedWeIT update. FAT-specific options:
+- `--fat-adversarial-ratio` target adversarial proportion in each local minibatch after warmup
+- `--fat-warmup-rounds` number of initial rounds per task using the warmup ratio
+- `--fat-warmup-adversarial-ratio` adversarial proportion during warmup
+- `--pgd-epsilon`, `--pgd-step-size`, `--pgd-steps`, `--pgd-random-start` control both FAT example generation and robust evaluation
+
+Example:
+```bash
+python -m cl_fcl_baseline.experiments.run_FedWeIT_FAT \
+  --dataset cifar100 \
+  --model ResNet32 \
+  --num-clients 5 \
+  --client-sample-ratio 0.4 \
+  --partition noniid \
+  --noniid-method dirichlet \
+  --dirichlet-beta 0.5 \
+  --num-tasks 10 \
+  --classes-per-task 10 \
+  --rounds-per-task 20 \
+  --local_epochs 10 \
+  --batch-size 64 \
+  --lr 0.005 \
+  --optimizer adam \
+  --lambda1 0.0005 \
+  --lambda2 30 \
+  --kb-sample-size 0 \
+  --fat-adversarial-ratio 0.5 \
+  --fat-warmup-rounds 0 \
+  --pgd-epsilon 0.031372549 \
+  --pgd-step-size 0.007843137 \
+  --pgd-steps 10
+```
+result:
+![FedWeIT-FAT](cl_fcl_baseline/analyse/plot-FedWeIT-FAT/eval_avg_global/global_avg_accuracy.png)
+![FedWeIT-FAT](cl_fcl_baseline/analyse/plot-FedWeIT-FAT/eval_avg_global/global_avg_robust_accuracy.png)
+![FedWeIT-FAT](cl_fcl_baseline/analyse/plot-FedWeIT-FAT/eval_compare/all_tasks_accuracy.png)
+![FedWeIT-FAT](cl_fcl_baseline/analyse/plot-FedWeIT-FAT/eval_compare/all_tasks_robust_accuracy.png)
+
+
+
+FedWeIT-SFAT keeps the FedWeIT + adversarial-training local step, then applies SFAT's alpha-slack client reweighting during server aggregation. SFAT-specific options:
+- `--sfat-adversarial-ratio` target adversarial proportion in each local minibatch after warmup
+- `--sfat-warmup-rounds` number of initial rounds per task using the warmup ratio
+- `--sfat-warmup-adversarial-ratio` adversarial proportion during warmup
+- `--sfat-alpha` SFAT slack factor used to upweight selected low-loss clients
+- `--sfat-enhanced-clients` number of clients upweighted in each round
+- `--sfat-loss-metric` client metric used for SFAT ranking
+- `--pgd-epsilon`, `--pgd-step-size`, `--pgd-steps`, `--pgd-random-start` control both adversarial example generation and robust evaluation
+
+Example:
+```bash
+python -m cl_fcl_baseline.experiments.run_FedWeIT_SFAT \
+  --dataset cifar100 \
+  --model ResNet32 \
+  --num-clients 5 \
+  --client-sample-ratio 0.4 \
+  --partition noniid \
+  --noniid-method dirichlet \
+  --dirichlet-beta 0.5 \
+  --num-tasks 10 \
+  --classes-per-task 10 \
+  --rounds-per-task 20 \
+  --local_epochs 10 \
+  --batch-size 64 \
+  --lr 0.005 \
+  --optimizer adam \
+  --lambda1 0.0005 \
+  --lambda2 30 \
+  --kb-sample-size 0 \
+  --sfat-adversarial-ratio 0.5 \
+  --sfat-alpha 0.09090909 \
+  --sfat-enhanced-clients 1 \
+  --sfat-loss-metric adv_ce_loss \
+  --pgd-epsilon 0.031372549 \
+  --pgd-step-size 0.007843137 \
+  --pgd-steps 10
+```
+result:
+![FedWeIT-SFAT](cl_fcl_baseline/analyse/plot-FedWeIT-SFAT/eval_avg_global/global_avg_accuracy.png)
+![FedWeIT-SFAT](cl_fcl_baseline/analyse/plot-FedWeIT-SFAT/eval_avg_global/global_avg_robust_accuracy.png)
+![FedWeIT-SFAT](cl_fcl_baseline/analyse/plot-FedWeIT-SFAT/eval_compare/all_tasks_accuracy.png)
+![FedWeIT-SFAT](cl_fcl_baseline/analyse/plot-FedWeIT-SFAT/eval_compare/all_tasks_robust_accuracy.png)
+
+FedWeIT-CalFAT keeps the FedWeIT task/mask/knowledge-base flow and uses calibrated adversarial supervision based on smoothed local class priors. CalFAT-specific options:
+- `--calfat-prior-smoothing` smoothing constant added to class priors before calibration
+- `--pgd-epsilon`, `--pgd-step-size`, `--pgd-steps`, `--pgd-random-start` control both adversarial example generation and robust evaluation
+
+Example:
+```bash
+python -m cl_fcl_baseline.experiments.run_FedWeIT_CalFAT \
+  --dataset cifar100 \
+  --model ResNet32 \
+  --num-clients 5 \
+  --client-sample-ratio 0.4 \
+  --partition noniid \
+  --noniid-method dirichlet \
+  --dirichlet-beta 0.5 \
+  --num-tasks 10 \
+  --classes-per-task 10 \
+  --rounds-per-task 20 \
+  --local_epochs 10 \
+  --batch-size 64 \
+  --lr 0.005 \
+  --optimizer adam \
+  --lambda1 0.0005 \
+  --lambda2 30 \
+  --kb-sample-size 0 \
+  --calfat-prior-smoothing 1e-6 \
+  --pgd-epsilon 0.031372549 \
+  --pgd-step-size 0.007843137 \
+  --pgd-steps 10
+```
+result:
+![FedWeIT-CalFAT](cl_fcl_baseline/analyse/plot-FedWeIT-CalFAT/eval_avg_global/global_avg_accuracy.png)
+![FedWeIT-CalFAT](cl_fcl_baseline/analyse/plot-FedWeIT-CalFAT/eval_avg_global/global_avg_robust_accuracy.png)
+![FedWeIT-CalFAT](cl_fcl_baseline/analyse/plot-FedWeIT-CalFAT/eval_compare/all_tasks_accuracy.png)
+![FedWeIT-CalFAT](cl_fcl_baseline/analyse/plot-FedWeIT-CalFAT/eval_compare/all_tasks_robust_accuracy.png)
+
+
+FedWeIT-RBN combines FedWeIT with FedRBN-style local BatchNorm personalization: a subset of AT users trains with adversarial loss, ST users receive propagated adversarial BatchNorm statistics, and optional PNC regularization can be enabled. RBN-specific options:
+- `--rbn-at-ratio` fraction of clients treated as AT users
+- `--rbn-adv-lambda` weight on the adversarial loss term for AT users
+- `--rbn-src-weight-mode` propagation weighting for BatchNorm statistics (`eq` or `cos`)
+- `--rbn-pnc` pseudo-noise calibration coefficient for ST users; `<0` disables PNC
+- `--rbn-pnc-warmup` number of initial task rounds with zero PNC coefficient
+- `--rbn-attack-noised-bn` whether PGD for AT users uses the noised BatchNorm path
+- `--pgd-epsilon`, `--pgd-step-size`, `--pgd-steps`, `--pgd-random-start` control both adversarial example generation and robust evaluation
+
+FedWeIT-RBN requires a BatchNorm-based backbone such as `VGG11`, `ResNet18`, `ResNet20`, or `ResNet32`.
+
+
+Example:
+```bash
+python -m cl_fcl_baseline.experiments.run_FedWeIT_RBN \
+  --dataset cifar100 \
+  --model ResNet32 \
+  --num-clients 5 \
+  --client-sample-ratio 0.4 \
+  --partition noniid \
+  --noniid-method dirichlet \
+  --dirichlet-beta 0.5 \
+  --num-tasks 10 \
+  --classes-per-task 10 \
+  --rounds-per-task 20 \
+  --local_epochs 10 \
+  --batch-size 64 \
+  --lr 0.005 \
+  --optimizer adam \
+  --lambda1 0.0005 \
+  --lambda2 30 \
+  --kb-sample-size 0 \
+  --rbn-at-ratio 1.0 \
+  --rbn-adv-lambda 0.5 \
+  --rbn-src-weight-mode cos \
+  --rbn-pnc 0.5 \
+  --rbn-pnc-warmup 10 \
+  --pgd-epsilon 0.031372549 \
+  --pgd-step-size 0.007843137 \
+  --pgd-steps 10
+```
+
+[//]: # (result:)
+
+[//]: # (![FedWeIT-RBN]&#40;cl_fcl_baseline/analyse/plot-FedWeIT-CalFAT/eval_avg_global/global_avg_accuracy.png&#41;)
+
+[//]: # (![FedWeIT-RBN]&#40;cl_fcl_baseline/analyse/plot-FedWeIT-CalFAT/eval_avg_global/global_avg_robust_accuracy.png&#41;)
+
+[//]: # (![FedWeIT-RBN]&#40;cl_fcl_baseline/analyse/plot-FedWeIT-CalFAT/eval_compare/all_tasks_accuracy.png&#41;)
+
+[//]: # (![FedWeIT-RBN]&#40;cl_fcl_baseline/analyse/plot-FedWeIT-CalFAT/eval_compare/all_tasks_robust_accuracy.png&#41;)
+
+
+FedWeIT-Sylva combines FedWeIT with Sylva-inspired personalized adversarial fine-tuning: class-balanced adversarial local training, similarity-aware aggregation, and a second benign refinement phase on selected layer groups after each task. Sylva-specific options:
+- `--sylva-class-balance-power` inverse-frequency exponent for class-balanced local loss
+- `--sylva-dynamic-rounds` number of rounds used to ramp from uniform to imbalance-aware weights
+- `--sylva-clean-weight`, `--sylva-adv-weight`, `--sylva-kl-weight` weights for clean CE, adversarial CE, and TRADES-style KL consistency
+- `--sylva-global-reg` local-to-global shared-parameter alignment penalty
+- `--sylva-agg-temperature`, `--sylva-agg-neighbors` similarity-aware aggregation controls
+- `--sylva-phase2-epochs`, `--sylva-phase2-topk-layers`, `--sylva-phase2-tradeoff`, `--sylva-phase2-lr-scale`, `--sylva-phase2-max-batches` control the post-task benign refinement phase
+- `--pgd-epsilon`, `--pgd-step-size`, `--pgd-steps`, `--pgd-random-start` control both adversarial example generation and robust evaluation
+
+Example:
+```bash
+python -m cl_fcl_baseline.experiments.run_FedWeIT_Sylva \
+  --dataset cifar100 \
+  --model ResNet32 \
+  --num-clients 5 \
+  --client-sample-ratio 0.4 \
+  --partition noniid \
+  --noniid-method dirichlet \
+  --dirichlet-beta 0.5 \
+  --num-tasks 10 \
+  --classes-per-task 10 \
+  --rounds-per-task 20 \
+  --local_epochs 10 \
+  --batch-size 64 \
+  --lr 0.005 \
+  --optimizer adam \
+  --lambda1 0.0005 \
+  --lambda2 30 \
+  --kb-sample-size 0 \
+  --sylva-class-balance-power 0.6 \
+  --sylva-dynamic-rounds 3 \
+  --sylva-clean-weight 0.8 \
+  --sylva-adv-weight 1.25 \
+  --sylva-kl-weight 8.0 \
+  --sylva-global-reg 1e-4 \
+  --sylva-agg-temperature 0.7 \
+  --sylva-agg-neighbors 2 \
+  --sylva-phase2-epochs 10 \
+  --sylva-phase2-topk-layers 1 \
+  --sylva-phase2-tradeoff 0.7 \
+  --sylva-phase2-lr-scale 0.0015 \
+  --sylva-phase2-max-batches 10 \
+  --pgd-epsilon 0.031372549 \
+  --pgd-step-size 0.007843137 \
+  --pgd-steps 10
+```
+result:
+![FedWeIT-Sylva](cl_fcl_baseline/analyse/plot-FedWeIT-Sylva/eval_avg_global/global_avg_accuracy.png)
+![FedWeIT-Sylva](cl_fcl_baseline/analyse/plot-FedWeIT-Sylva/eval_avg_global/global_avg_robust_accuracy.png)
+![FedWeIT-Sylva](cl_fcl_baseline/analyse/plot-FedWeIT-Sylva/eval_compare/all_tasks_accuracy.png)
+![FedWeIT-Sylva](cl_fcl_baseline/analyse/plot-FedWeIT-Sylva/eval_compare/all_tasks_robust_accuracy.png)
 
 
 **FedAvg usage notes**

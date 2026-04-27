@@ -377,6 +377,6 @@ def plots_fcl_robust(log_text, output_dir="plot-FCL-robust"):
 
 
 if __name__ == "__main__":
-    log_path = "../experiments/logs/fedweit_20260420_235827.jsonl"
+    log_path = "../experiments/logs/fedweit_sylva_20260425_123533.jsonl"
     with open(log_path, "r", encoding="utf-8") as f:
-        plots_fcl_robust(f.read(), output_dir="plot-FCL-robust")
+        plots_fcl_robust(f.read(), output_dir="plot-FedWeIT-Sylva")

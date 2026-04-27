@@ -103,6 +103,7 @@ def _add_common_fcl_args() -> argparse.ArgumentParser:
     parser.add_argument("--num-classes", type=int, default=100)
     parser.add_argument("--model", type=str, default="ResNet32",
                         choices=["mlp", "simplecnn", "VGG11", "ResNet18", "ResNet20", "ResNet32"])
+    parser.add_argument("--hidden-dim", type=int, default=200)
     parser.add_argument("--show-progress", action="store_true", default=False)
     parser.add_argument("--eval-every", type=int, default=1)
     parser.add_argument("--log-file", type=str, default="")
@@ -132,15 +133,98 @@ def build_fedweit_parser() -> argparse.ArgumentParser:
     parser.add_argument("--input-shape", type=int, nargs=3, default=[1, 28, 28])
     return parser
 
-def _parse_fedweit_pgd_args() -> argparse.Namespace:
-    parser = build_fedweit_parser()
-    parser.description = "Run a FedWeIT baseline with PGD robust evaluation."
+def _add_pgd_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--pgd-epsilon", type=float, default=8.0 / 255.0, help="PGD L-inf radius. For normalized torchvision datasets this is interpreted in raw pixel space unless --pgd-normalized-space is set.",)
     parser.add_argument("--pgd-step-size", type=float, default=2.0 / 255.0, help="PGD step size. For normalized torchvision datasets this is interpreted in raw pixel space unless --pgd-normalized-space is set.",)
     parser.add_argument("--pgd-steps", type=int, default=10, help="number of PGD ascent steps")
     parser.add_argument("--pgd-random-start", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--pgd-normalized-space", action="store_true", default=False, help="treat --pgd-epsilon and --pgd-step-size as model input-space values instead of raw pixel-space values",)
     parser.add_argument("--pgd-max-batches", type=int, default=0, help="maximum eval batches for PGD robust testing; <=0 evaluates the full test loader",)
+
+
+def _set_algorithm_choice(parser: argparse.ArgumentParser, name: str) -> None:
+    for action in parser._actions:
+        if action.dest == "algorithm":
+            action.default = name
+            action.choices = [name]
+            return
+
+
+def _parse_fedweit_pgd_args() -> argparse.Namespace:
+    parser = build_fedweit_parser()
+    parser.description = "Run a FedWeIT baseline with PGD robust evaluation."
+    _add_pgd_args(parser)
+    return parser.parse_args()
+
+
+def _parse_fedweit_fat_args() -> argparse.Namespace:
+    parser = build_fedweit_parser()
+    parser.description = "Run FedWeIT with Federated Adversarial Training and PGD robust evaluation."
+    _set_algorithm_choice(parser, "fedweit_fat")
+    _add_pgd_args(parser)
+    parser.add_argument("--fat-adversarial-ratio", type=float, default=0.5, help="proportion of each local minibatch replaced by PGD adversarial examples after warmup")
+    parser.add_argument("--fat-warmup-rounds", type=int, default=0, help="number of initial rounds per task trained with --fat-warmup-adversarial-ratio")
+    parser.add_argument("--fat-warmup-adversarial-ratio", type=float, default=0.1, help="adversarial minibatch proportion used during FAT warmup rounds")
+    return parser.parse_args()
+
+
+def _parse_fedweit_sfat_args() -> argparse.Namespace:
+    parser = build_fedweit_parser()
+    parser.description = "Run FedWeIT with Slack Federated Adversarial Training and PGD robust evaluation."
+    _set_algorithm_choice(parser, "fedweit_sfat")
+    _add_pgd_args(parser)
+    parser.add_argument("--sfat-adversarial-ratio", type=float, default=0.5, help="proportion of each local minibatch replaced by PGD adversarial examples after warmup")
+    parser.add_argument("--sfat-warmup-rounds", type=int, default=0, help="number of initial rounds per task trained with --sfat-warmup-adversarial-ratio")
+    parser.add_argument("--sfat-warmup-adversarial-ratio", type=float, default=0.1, help="adversarial minibatch proportion used during SFAT warmup rounds")
+    parser.add_argument("--sfat-alpha", type=float, default=1.0 / 11.0, help="SFAT alpha-slack value in [0, 1); top clients use (1 + alpha) / (1 - alpha)")
+    parser.add_argument("--sfat-enhanced-clients", type=int, default=1, help="number of low adversarial-loss clients upweighted in each aggregation")
+    parser.add_argument("--sfat-loss-metric", type=str, default="adv_ce_loss", choices=["adv_ce_loss", "ce_loss", "loss"], help="client metric used for SFAT ascending loss ranking")
+    return parser.parse_args()
+
+
+def _parse_fedweit_calfat_args() -> argparse.Namespace:
+    parser = build_fedweit_parser()
+    parser.description = "Run FedWeIT with Calibrated Federated Adversarial Training and PGD robust evaluation."
+    _set_algorithm_choice(parser, "fedweit_calfat")
+    _add_pgd_args(parser)
+    parser.add_argument("--calfat-prior-smoothing", type=float, default=1e-6,
+                        help="small positive constant delta added to each client-task class prior for calibrated logits",)
+    return parser.parse_args()
+
+
+def _parse_fedweit_rbn_args() -> argparse.Namespace:
+    parser = build_fedweit_parser()
+    parser.description = "Run FedWeIT with FedRBN-style local BatchNorm personalization and PGD robust evaluation."
+    _set_algorithm_choice(parser, "fedweit_rbn")
+    _add_pgd_args(parser)
+    parser.add_argument("--rbn-at-ratio", type=float, default=1.0, help="fraction of clients treated as AT users; the rest are ST users receiving propagated BNa")
+    parser.add_argument("--rbn-adv-lambda", type=float, default=0.5, help="weight on the adversarial loss term for AT users")
+    parser.add_argument("--rbn-src-weight-mode", type=str, default="cos", choices=["eq", "cos"], help="source-client weighting used to propagate BNa from AT users to ST users")
+    parser.add_argument("--rbn-pnc", type=float, default=0.5, help="coefficient of the pseudo-noise calibration loss for ST users; <0 disables PNC")
+    parser.add_argument("--rbn-pnc-warmup", type=int, default=10, help="number of initial task rounds using zero PNC coefficient")
+    parser.add_argument("--rbn-attack-noised-bn", action=argparse.BooleanOptionalAction, default=True, help="use the noised BN path while generating PGD adversarial examples for AT users")
+    return parser.parse_args()
+
+
+def _parse_fedweit_sylva_args() -> argparse.Namespace:
+    parser = build_fedweit_parser()
+    parser.description = "Run FedWeIT with Sylva-inspired personalized adversarial fine-tuning and PGD robust evaluation."
+    _set_algorithm_choice(parser, "fedweit_sylva")
+    _add_pgd_args(parser)
+    parser.add_argument("--sylva-class-balance-power", type=float, default=0.6, help="inverse-frequency exponent for Sylva's class-balanced local loss")
+    parser.add_argument("--sylva-class-balance-smoothing", type=float, default=1e-3, help="small positive constant added to local class counts before weighting")
+    parser.add_argument("--sylva-dynamic-rounds", type=int, default=3, help="number of task rounds used to ramp class weights from uniform to local imbalance-aware")
+    parser.add_argument("--sylva-clean-weight", type=float, default=0.8, help="weight applied to Sylva's clean cross-entropy term")
+    parser.add_argument("--sylva-adv-weight", type=float, default=1.25, help="weight applied to Sylva's adversarial cross-entropy term")
+    parser.add_argument("--sylva-kl-weight", type=float, default=8.0, help="weight applied to Sylva's TRADES-style KL consistency term")
+    parser.add_argument("--sylva-global-reg", type=float, default=1e-4, help="coefficient for Sylva's local-to-global shared-parameter alignment penalty")
+    parser.add_argument("--sylva-agg-temperature", type=float, default=0.7, help="temperature scaling used by Sylva's similarity-aware aggregation")
+    parser.add_argument("--sylva-agg-neighbors", type=int, default=2, help="number of nearest clients used for Sylva similarity scoring; <=0 uses all peers")
+    parser.add_argument("--sylva-phase2-epochs", type=int, default=10, help="local benign refinement epochs for Sylva phase 2 after each task")
+    parser.add_argument("--sylva-phase2-topk-layers", type=int, default=1, help="number of layer groups selected for Sylva phase 2 benign refinement")
+    parser.add_argument("--sylva-phase2-tradeoff", type=float, default=0.7, help="penalty weight for adversarial sensitivity when scoring Sylva phase 2 layer groups")
+    parser.add_argument("--sylva-phase2-lr-scale", type=float, default=0.0015, help="multiplier applied to the base learning rate during Sylva phase 2 benign refinement")
+    parser.add_argument("--sylva-phase2-max-batches", type=int, default=10, help="maximum batches used for Sylva phase 2 layer scoring and benign refinement; <=0 uses all batches")
     return parser.parse_args()
 
 
