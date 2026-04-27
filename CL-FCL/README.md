@@ -160,6 +160,8 @@ result:
 ![FedWeIT](cl_fcl_baseline/analyse/plot-FedWeIT/eval_compare/all_tasks_accuracy.png)
 
 
+### **FedWeIT-PGD**
+
 FedWeIT-PGD keeps the FedWeIT optimization flow unchanged and adds PGD robust evaluation after each task/round.
 
 with robust accuracy:
@@ -196,6 +198,8 @@ result:
 ![FedWeIT](cl_fcl_baseline/analyse/plot-FedWeIT-robust/eval_avg_global/global_avg_robust_accuracy.png)
 ![FedWeIT](cl_fcl_baseline/analyse/plot-FedWeIT-robust/eval_compare/all_tasks_accuracy.png)
 ![FedWeIT](cl_fcl_baseline/analyse/plot-FedWeIT-robust/eval_compare/all_tasks_robust_accuracy.png)
+
+### **FedWeIT-FAT**
 
 FedWeIT-FAT uses the same FedWeIT task/mask/knowledge-base flow, but each local minibatch is mixed with PGD adversarial examples before the FedWeIT update. FAT-specific options:
 - `--fat-adversarial-ratio` target adversarial proportion in each local minibatch after warmup
@@ -236,6 +240,8 @@ result:
 ![FedWeIT-FAT](cl_fcl_baseline/analyse/plot-FedWeIT-FAT/eval_compare/all_tasks_robust_accuracy.png)
 
 
+
+### **FedWeIT-SFAT**
 
 FedWeIT-SFAT keeps the FedWeIT + adversarial-training local step, then applies SFAT's alpha-slack client reweighting during server aggregation. SFAT-specific options:
 - `--sfat-adversarial-ratio` target adversarial proportion in each local minibatch after warmup
@@ -280,6 +286,8 @@ result:
 ![FedWeIT-SFAT](cl_fcl_baseline/analyse/plot-FedWeIT-SFAT/eval_compare/all_tasks_accuracy.png)
 ![FedWeIT-SFAT](cl_fcl_baseline/analyse/plot-FedWeIT-SFAT/eval_compare/all_tasks_robust_accuracy.png)
 
+### **FedWeIT-CalFAT**
+
 FedWeIT-CalFAT keeps the FedWeIT task/mask/knowledge-base flow and uses calibrated adversarial supervision based on smoothed local class priors. CalFAT-specific options:
 - `--calfat-prior-smoothing` smoothing constant added to class priors before calibration
 - `--pgd-epsilon`, `--pgd-step-size`, `--pgd-steps`, `--pgd-random-start` control both adversarial example generation and robust evaluation
@@ -315,6 +323,8 @@ result:
 ![FedWeIT-CalFAT](cl_fcl_baseline/analyse/plot-FedWeIT-CalFAT/eval_compare/all_tasks_accuracy.png)
 ![FedWeIT-CalFAT](cl_fcl_baseline/analyse/plot-FedWeIT-CalFAT/eval_compare/all_tasks_robust_accuracy.png)
 
+
+### **FedWeIT-RBN**
 
 FedWeIT-RBN combines FedWeIT with FedRBN-style local BatchNorm personalization: a subset of AT users trains with adversarial loss, ST users receive propagated adversarial BatchNorm statistics, and optional PNC regularization can be enabled. RBN-specific options:
 - `--rbn-at-ratio` fraction of clients treated as AT users
@@ -368,6 +378,8 @@ python -m cl_fcl_baseline.experiments.run_FedWeIT_RBN \
 
 [//]: # (![FedWeIT-RBN]&#40;cl_fcl_baseline/analyse/plot-FedWeIT-CalFAT/eval_compare/all_tasks_robust_accuracy.png&#41;)
 
+
+### **FedWeIT-Sylva**
 
 FedWeIT-Sylva combines FedWeIT with Sylva-inspired personalized adversarial fine-tuning: class-balanced adversarial local training, similarity-aware aggregation, and a second benign refinement phase on selected layer groups after each task. Sylva-specific options:
 - `--sylva-class-balance-power` inverse-frequency exponent for class-balanced local loss
