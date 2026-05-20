@@ -8,6 +8,7 @@ import torch.nn.functional as F
 from torch.func import functional_call
 
 from ..contracts import ClientContext, MetricDict, StateDict, TrainResult
+from ..trainers.client import FederatedClient
 from ..trainers.utils import detach_state_dict, move_to_device
 from .PGD import PGDConfig, pgd_linf_attack
 from .fedweit import FedWeITClient, FedWeITServer, _state_l2_norm, _state_nnz, _state_numel
@@ -21,6 +22,141 @@ class _FunctionalModel(torch.nn.Module):
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
         return functional_call(self.model, self.params_and_buffers, (inputs,))
+
+
+@dataclass
+class FATClient(FederatedClient):
+    pgd_config: PGDConfig = field(default_factory=PGDConfig)
+    adversarial_ratio: float = 0.5
+    warmup_rounds: int = 0
+    warmup_adversarial_ratio: float = 0.1
+
+    def _round_adversarial_ratio(self, round_idx: int | None) -> float:
+        if int(self.warmup_rounds) > 0 and round_idx is not None and int(round_idx) < int(self.warmup_rounds):
+            ratio = float(self.warmup_adversarial_ratio)
+        else:
+            ratio = float(self.adversarial_ratio)
+        return min(max(ratio, 0.0), 1.0)
+
+    def _adversarial_count(self, batch_size: int, ratio: float) -> int:
+        if batch_size <= 0 or ratio <= 0.0:
+            return 0
+        return min(batch_size, max(1, int(round(batch_size * ratio))))
+
+    def _mixed_fat_batch(
+        self,
+        inputs: torch.Tensor,
+        targets: torch.Tensor,
+        adversarial_ratio: float,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        batch_size = int(targets.shape[0])
+        adv_count = self._adversarial_count(batch_size, adversarial_ratio)
+        if adv_count <= 0:
+            empty = torch.empty(0, dtype=torch.long, device=targets.device)
+            return inputs, empty, torch.arange(batch_size, dtype=torch.long, device=targets.device)
+
+        permutation = torch.randperm(batch_size, device=targets.device)
+        adv_indices = permutation[:adv_count]
+        clean_indices = permutation[adv_count:]
+        was_training = self.trainer.model.training
+        self.trainer.model.eval()
+        try:
+            adversarial_inputs = pgd_linf_attack(
+                self.trainer.model,
+                inputs.index_select(0, adv_indices),
+                targets.index_select(0, adv_indices),
+                self.pgd_config,
+            )
+        finally:
+            if was_training:
+                self.trainer.model.train()
+
+        mixed_inputs = inputs.detach().clone()
+        mixed_inputs[adv_indices] = adversarial_inputs
+        return mixed_inputs, adv_indices, clean_indices
+
+    def fit(self, global_state: StateDict, context: ClientContext) -> TrainResult:
+        self.trainer.model.load_state_dict(global_state, strict=True)
+        self.trainer.model.to(self.trainer.device)
+        self.trainer.model.train()
+        optimizer = self.trainer.optimizer
+        adversarial_ratio = self._round_adversarial_ratio(context.round_idx)
+
+        total_examples = 0
+        total_loss = 0.0
+        total_ce = 0.0
+        total_clean_ce = 0.0
+        total_adv_ce = 0.0
+        total_clean_examples = 0
+        total_adv_examples = 0
+        total_correct = 0
+
+        for _ in range(int(self.epochs)):
+            for inputs, targets in self.train_loader:
+                inputs = move_to_device(inputs, self.trainer.device)
+                targets = move_to_device(targets, self.trainer.device)
+                mixed_inputs, adv_indices, clean_indices = self._mixed_fat_batch(
+                    inputs=inputs,
+                    targets=targets,
+                    adversarial_ratio=adversarial_ratio,
+                )
+
+                optimizer.zero_grad()
+                logits = self.trainer.model(mixed_inputs)
+                ce_loss = F.cross_entropy(logits, targets)
+                ce_loss.backward()
+                optimizer.step()
+
+                batch_size = int(targets.shape[0])
+                adv_count = int(adv_indices.numel())
+                clean_count = int(clean_indices.numel())
+                total_examples += batch_size
+                total_loss += float(ce_loss.detach().item()) * batch_size
+                total_ce += float(ce_loss.detach().item()) * batch_size
+                total_correct += int((logits.argmax(dim=1) == targets).sum().item())
+                if clean_count > 0:
+                    clean_loss = F.cross_entropy(
+                        logits.index_select(0, clean_indices),
+                        targets.index_select(0, clean_indices),
+                    )
+                    total_clean_ce += float(clean_loss.detach().item()) * clean_count
+                    total_clean_examples += clean_count
+                if adv_count > 0:
+                    adv_loss = F.cross_entropy(
+                        logits.index_select(0, adv_indices),
+                        targets.index_select(0, adv_indices),
+                    )
+                    total_adv_ce += float(adv_loss.detach().item()) * adv_count
+                    total_adv_examples += adv_count
+
+        if total_examples == 0:
+            metrics: MetricDict = {
+                "loss": 0.0,
+                "ce_loss": 0.0,
+                "clean_ce_loss": 0.0,
+                "adv_ce_loss": 0.0,
+                "accuracy": 0.0,
+                "adversarial_ratio": float(adversarial_ratio),
+                "num_adversarial_samples": 0.0,
+                "num_clean_samples": 0.0,
+            }
+        else:
+            metrics = {
+                "loss": total_loss / total_examples,
+                "ce_loss": total_ce / total_examples,
+                "clean_ce_loss": total_clean_ce / max(1, total_clean_examples),
+                "adv_ce_loss": total_adv_ce / max(1, total_adv_examples),
+                "accuracy": total_correct / total_examples,
+                "adversarial_ratio": float(adversarial_ratio),
+                "num_adversarial_samples": float(total_adv_examples),
+                "num_clean_samples": float(total_clean_examples),
+            }
+        return TrainResult(
+            client_id=self.client_id,
+            num_samples=len(self.train_loader.dataset),
+            metrics=metrics,
+            payload={"model_state": detach_state_dict(self.trainer.model.state_dict())},
+        )
 
 
 @dataclass

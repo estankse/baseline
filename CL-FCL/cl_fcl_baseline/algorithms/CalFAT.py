@@ -9,6 +9,7 @@ from torch.func import functional_call
 from torch.utils.data import DataLoader
 
 from ..contracts import ClientContext, MetricDict, StateDict, TrainResult
+from ..trainers.client import FederatedClient
 from ..trainers.utils import detach_state_dict, move_to_device
 from .PGD import PGDConfig
 from .fedweit import FedWeITClient, FedWeITServer, _state_l2_norm, _state_nnz, _state_numel
@@ -193,6 +194,106 @@ def evaluate_calfat_pgd_robustness(
         "num_batches": float(evaluated_batches),
         "num_samples": float(total_examples),
     }
+
+
+@dataclass
+class CalFATClient(FederatedClient):
+    pgd_config: PGDConfig = field(default_factory=PGDConfig)
+    num_classes: int = 10
+    prior_smoothing: float = 1e-6
+    class_prior: torch.Tensor | None = field(default=None, init=False)
+
+    def _class_prior(self) -> torch.Tensor:
+        if self.class_prior is not None:
+            return self.class_prior.detach().clone()
+        prior = torch.full((int(self.num_classes),), float(self.prior_smoothing), dtype=torch.float32)
+        dataset = self.train_loader.dataset
+        total_samples = 0
+        for index in range(len(dataset)):
+            _, target = dataset[index]
+            target_value = int(target.item()) if isinstance(target, torch.Tensor) else int(target)
+            if 0 <= target_value < prior.numel():
+                prior[target_value] += 1.0
+            total_samples += 1
+        if total_samples > 0:
+            prior = (prior - float(self.prior_smoothing)) / float(total_samples) + float(self.prior_smoothing)
+        self.class_prior = prior.detach().cpu().clone()
+        return self.class_prior.detach().clone()
+
+    def class_log_prior(self, device: torch.device | str = "cpu") -> torch.Tensor:
+        return torch.log(self._class_prior().to(device))
+
+    def fit(self, global_state: StateDict, context: ClientContext) -> TrainResult:
+        del context
+        self.trainer.model.load_state_dict(global_state, strict=True)
+        self.trainer.model.to(self.trainer.device)
+        self.trainer.model.train()
+        optimizer = self.trainer.optimizer
+        log_prior = self.class_log_prior(self.trainer.device)
+
+        total_examples = 0
+        total_loss = 0.0
+        total_cce = 0.0
+        total_adv_ce = 0.0
+        total_correct = 0
+
+        for _ in range(int(self.epochs)):
+            for inputs, targets in self.train_loader:
+                inputs = move_to_device(inputs, self.trainer.device)
+                targets = move_to_device(targets, self.trainer.device)
+                was_training = self.trainer.model.training
+                self.trainer.model.eval()
+                try:
+                    adversarial_inputs = calibrated_pgd_linf_attack(
+                        self.trainer.model,
+                        inputs,
+                        log_prior,
+                        self.pgd_config,
+                    )
+                finally:
+                    if was_training:
+                        self.trainer.model.train()
+
+                optimizer.zero_grad()
+                logits = self.trainer.model(adversarial_inputs)
+                adjusted_logits = logits + log_prior.view(1, -1)
+                cce_loss = F.cross_entropy(adjusted_logits, targets)
+                adv_ce_loss = F.cross_entropy(logits, targets)
+                cce_loss.backward()
+                optimizer.step()
+
+                batch_size = int(targets.shape[0])
+                total_examples += batch_size
+                total_loss += float(cce_loss.detach().item()) * batch_size
+                total_cce += float(cce_loss.detach().item()) * batch_size
+                total_adv_ce += float(adv_ce_loss.detach().item()) * batch_size
+                total_correct += int((adjusted_logits.argmax(dim=1) == targets).sum().item())
+
+        class_prior = self._class_prior()
+        if total_examples == 0:
+            metrics: MetricDict = {
+                "loss": 0.0,
+                "cce_loss": 0.0,
+                "adv_ce_loss": 0.0,
+                "accuracy": 0.0,
+                "class_prior_min": float(class_prior.min().item()),
+                "class_prior_max": float(class_prior.max().item()),
+            }
+        else:
+            metrics = {
+                "loss": total_loss / total_examples,
+                "cce_loss": total_cce / total_examples,
+                "adv_ce_loss": total_adv_ce / total_examples,
+                "accuracy": total_correct / total_examples,
+                "class_prior_min": float(class_prior.min().item()),
+                "class_prior_max": float(class_prior.max().item()),
+            }
+        return TrainResult(
+            client_id=self.client_id,
+            num_samples=len(self.train_loader.dataset),
+            metrics=metrics,
+            payload={"model_state": detach_state_dict(self.trainer.model.state_dict())},
+        )
 
 
 @dataclass

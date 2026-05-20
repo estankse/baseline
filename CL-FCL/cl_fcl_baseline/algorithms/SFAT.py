@@ -5,9 +5,10 @@ import math
 from typing import Dict, List, Mapping, Sequence
 
 import torch
+from ..trainers.client import FederatedClient
 
 from ..contracts import AggregationResult, StateDict, TrainResult
-from .FAT import FedWeITFATClient
+from .FAT import FATClient, FedWeITFATClient
 from .fedweit import FedWeITAggregator, FedWeITServer
 
 
@@ -24,6 +25,111 @@ def _safe_metric(result: TrainResult, metric_name: str) -> float:
     if not math.isfinite(metric):
         return 0.0
     return metric
+
+
+@dataclass
+class SFATClient(FATClient):
+    """FL client with FAT-style local adversarial training for SFAT."""
+
+
+@dataclass
+class SFATAggregator:
+    metric_prefix: str = "client_"
+    alpha: float = 1.0 / 11.0
+    enhanced_clients: int = 1
+    slack_loss_metric: str = "adv_ce_loss"
+
+    def aggregate(self, client_results: List[TrainResult]) -> AggregationResult:
+        if not client_results:
+            return AggregationResult(global_state={}, metrics={"num_clients": 0.0, "total_samples": 0.0})
+
+        sample_counts = {
+            result.client_id: float(max(int(result.num_samples), 0))
+            for result in client_results
+        }
+        total_samples = sum(sample_counts.values())
+        if total_samples <= 0.0:
+            sample_counts = {result.client_id: 1.0 for result in client_results}
+            total_samples = float(len(client_results))
+
+        scored = []
+        for result in client_results:
+            sample_weight = sample_counts[result.client_id] / total_samples
+            scored.append((sample_weight * _safe_metric(result, self.slack_loss_metric), result.client_id))
+
+        alpha = min(max(float(self.alpha), 0.0), 1.0 - 1e-6)
+        num_clients = len(client_results)
+        max_enhanced = max(1, num_clients // 2) if num_clients > 1 else 1
+        enhanced = min(max(1, int(self.enhanced_clients)), max_enhanced, num_clients)
+        selected = {
+            client_id
+            for _, client_id in sorted(scored, key=lambda item: (item[0], item[1]))[:enhanced]
+        }
+        boost = (1.0 + alpha) / max(1.0 - alpha, 1e-6)
+        client_weights = {
+            result.client_id: sample_counts[result.client_id] * (boost if result.client_id in selected else 1.0)
+            for result in client_results
+        }
+
+        accumulator: Dict[str, torch.Tensor] = {}
+        total_weights: Dict[str, float] = {}
+        metric_sums: Dict[str, float] = {}
+        metric_weights: Dict[str, float] = {}
+
+        for result in client_results:
+            state = result.payload.get("model_state", {})
+            if not isinstance(state, Mapping):
+                continue
+            weight = float(client_weights.get(result.client_id, 1.0))
+            for name, tensor in state.items():
+                if not isinstance(tensor, torch.Tensor):
+                    continue
+                if tensor.is_floating_point():
+                    weighted_tensor = tensor.detach().float() * weight
+                    if name not in accumulator:
+                        accumulator[name] = weighted_tensor
+                        total_weights[name] = weight
+                    else:
+                        accumulator[name] += weighted_tensor
+                        total_weights[name] += weight
+                elif name not in accumulator:
+                    accumulator[name] = tensor.detach().clone()
+                    total_weights[name] = 1.0
+            sample_weight = float(max(int(result.num_samples), 0))
+            for metric_name, metric_value in result.metrics.items():
+                metric_sums[metric_name] = metric_sums.get(metric_name, 0.0) + float(metric_value) * sample_weight
+                metric_weights[metric_name] = metric_weights.get(metric_name, 0.0) + sample_weight
+
+        averaged_state = {
+            name: (
+                tensor / max(total_weights.get(name, 0.0), 1e-12)
+                if tensor.is_floating_point()
+                else tensor.detach().clone()
+            )
+            for name, tensor in accumulator.items()
+        }
+        averaged_metrics = {
+            f"{self.metric_prefix}{metric_name}": metric_sums[metric_name] / metric_weights[metric_name]
+            for metric_name in metric_sums
+            if metric_weights.get(metric_name, 0.0) > 0.0
+        }
+        averaged_metrics["num_clients"] = float(len(client_results))
+        averaged_metrics["total_samples"] = float(sum(max(int(result.num_samples), 0) for result in client_results))
+        averaged_metrics["sfat_alpha"] = float(alpha)
+        averaged_metrics["sfat_enhanced_clients"] = float(len(selected))
+        averaged_metrics["sfat_weight_min"] = float(min(client_weights.values())) if client_weights else 0.0
+        averaged_metrics["sfat_weight_max"] = float(max(client_weights.values())) if client_weights else 0.0
+        return AggregationResult(
+            global_state=averaged_state,
+            metrics=averaged_metrics,
+            metadata={
+                "aggregator": "sfat",
+                "sfat_alpha": float(alpha),
+                "sfat_selected_clients": sorted(selected),
+                "sfat_client_weights": dict(client_weights),
+                "sfat_loss_metric": self.slack_loss_metric,
+            },
+        )
 
 
 @dataclass

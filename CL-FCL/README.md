@@ -28,12 +28,19 @@ FedWeIT Federated Continual Learning
 - `FedWeITClient`
 - `FedWeITServer`
 - `run_FedWeIT.py`
-- `run_FedWeIT_PGD.py` adds PGD robust evaluation to FedWeIT
-- `run_FedWeIT_FAT.py` combines FedWeIT with local Federated Adversarial Training
-- `run_FedWeIT_SFAT.py` combines FedWeIT with Slack Federated Adversarial Training
-- `run_FedWeIT_CalFAT.py` combines FedWeIT with Calibrated Federated Adversarial Training
-- `run_FedWeIT_RBN.py` combines FedWeIT with FedRBN-style local BatchNorm personalization
-- `run_FedWeIT_Sylva.py` combines FedWeIT with Sylva-inspired personalized adversarial fine-tuning
+- `FCL_robust/run_FedWeIT_PGD.py` adds PGD robust evaluation to FedWeIT
+- `FCL_robust/run_FedWeIT_FAT.py` combines FedWeIT with local Federated Adversarial Training
+- `FCL_robust/run_FedWeIT_SFAT.py` combines FedWeIT with Slack Federated Adversarial Training
+- `FCL_robust/run_FedWeIT_CalFAT.py` combines FedWeIT with Calibrated Federated Adversarial Training
+- `FCL_robust/run_FedWeIT_RBN.py` combines FedWeIT with FedRBN-style local BatchNorm personalization
+- `FCL_robust/run_FedWeIT_Sylva.py` combines FedWeIT with Sylva-inspired personalized adversarial fine-tuning
+
+Standalone robust FL baselines
+- `robust/run_FAT.py`
+- `robust/run_SFAT.py`
+- `robust/run_CalFAT.py`
+- `robust/run_RBN.py`
+- `robust/run_Sylva.py`
 
 FedProx (proximal regularization)
 - `FedProxClient`, `FedProxTrainer`
@@ -45,7 +52,7 @@ MOON (model-contrastive federated learning)
 
 Data + Models
 - `cifar10`, `cifar100`, `MNIST`
-- `VGG11`, `ResNet18`, `ResNet20`, `ResNet32`
+- `VGG11`, `ResNet18`, `ResNet20`, `ResNet32`, `ViTTiny`, `ViTSmall`, `ViTBase`
 
 
 **Quickstart**
@@ -80,35 +87,311 @@ Run FedWeIT:
 python -m cl_fcl_baseline.experiments.run_FedWeIT
 ```
 
+Robust FedWeIT runners live under `cl_fcl_baseline/experiments/FCL_robust/` and the standalone robust FL baselines live under `cl_fcl_baseline/experiments/robust/`.
+
 Run FedWeIT-PGD:
 ```bash
-python -m cl_fcl_baseline.experiments.run_FedWeIT_PGD
+python cl_fcl_baseline/experiments/FCL_robust/run_FedWeIT_PGD.py
 ```
 
 Run FedWeIT-FAT:
 ```bash
-python -m cl_fcl_baseline.experiments.run_FedWeIT_FAT
+python cl_fcl_baseline/experiments/FCL_robust/run_FedWeIT_FAT.py
 ```
 
 Run FedWeIT-SFAT:
 ```bash
-python -m cl_fcl_baseline.experiments.run_FedWeIT_SFAT
+python cl_fcl_baseline/experiments/FCL_robust/run_FedWeIT_SFAT.py
 ```
 
 Run FedWeIT-CalFAT:
 ```bash
-python -m cl_fcl_baseline.experiments.run_FedWeIT_CalFAT
+python cl_fcl_baseline/experiments/FCL_robust/run_FedWeIT_CalFAT.py
 ```
 
 Run FedWeIT-RBN:
 ```bash
-python -m cl_fcl_baseline.experiments.run_FedWeIT_RBN
+python cl_fcl_baseline/experiments/FCL_robust/run_FedWeIT_RBN.py
 ```
 
 Run FedWeIT-Sylva:
 ```bash
-python -m cl_fcl_baseline.experiments.run_FedWeIT_Sylva
+python cl_fcl_baseline/experiments/FCL_robust/run_FedWeIT_Sylva.py
 ```
+
+Run standalone FAT:
+```bash
+python cl_fcl_baseline/experiments/robust/run_FAT.py
+```
+
+Run standalone SFAT:
+```bash
+python cl_fcl_baseline/experiments/robust/run_SFAT.py
+```
+
+Run standalone CalFAT:
+```bash
+python cl_fcl_baseline/experiments/robust/run_CalFAT.py
+```
+
+Run standalone RBN:
+```bash
+python cl_fcl_baseline/experiments/robust/run_RBN.py
+```
+
+Run standalone Sylva:
+```bash
+python cl_fcl_baseline/experiments/robust/run_Sylva.py
+```
+
+Analyse standalone robust logs in `cl_fcl_baseline/experiments/robust/logs`:
+```bash
+python cl_fcl_baseline/analyse/analyse-robust.py
+```
+
+The script writes per-run plots plus latest-per-method comparisons to `cl_fcl_baseline/analyse/plot-robust/`.
+
+**Standalone robust FL usage notes**
+
+The standalone robust runners under `cl_fcl_baseline/experiments/robust/` follow the standard FL data partitioning flow and add robust local training and/or robust evaluation on top of it. They all use the shared argument definitions in `cl_fcl_baseline/experiments/args.py`, emit JSONL logs into `cl_fcl_baseline/experiments/robust/logs/`, and can be visualized with `cl_fcl_baseline/analyse/analyse-robust.py`.
+
+Common options:
+- `--num-clients` total clients
+- `--client-sample-ratio` fraction of clients sampled each round
+- `--partition` `iid` or `noniid`
+- `--noniid-method` `dirichlet` or `shards`
+- `--dirichlet-beta` heterogeneity for Dirichlet splits
+- `--num-rounds` communication rounds
+- `--local_epochs` local epochs per round
+- `--batch-size` local minibatch size
+- `--lr` learning rate
+- `--optimizer` `sgd` or `adam`
+- `--device` `cpu` | `cuda` | `cuda:0` | `auto`
+- `--model` `mlp` | `simplecnn` | `VGG11` | `ResNet18` | `ResNet20` | `ResNet32` | `ViTTiny` | `ViTSmall` | `ViTBase`
+- `--eval-every` evaluation frequency in rounds
+- `--log-file` JSONL log path (empty = auto)
+- `--pgd-epsilon`, `--pgd-step-size`, `--pgd-steps`, `--pgd-random-start` control PGD adversarial example generation and robust evaluation
+- `--pgd-normalized-space` treats PGD magnitudes in normalized model-input space instead of raw pixel space
+- `--pgd-max-batches` limits robust evaluation batches; `<=0` uses the full test set
+
+### **FAT usage notes**
+
+`run_FAT.py` keeps the server side as plain FedAvg and replaces part of each local minibatch with PGD adversarial examples during client training.
+
+Method-specific options:
+- `--fat-adversarial-ratio` target adversarial proportion in each local minibatch after warmup
+- `--fat-warmup-rounds` number of initial rounds using the warmup adversarial ratio
+- `--fat-warmup-adversarial-ratio` adversarial proportion used during the warmup stage
+
+Example:
+```bash
+python cl_fcl_baseline/experiments/robust/run_FAT.py \
+  --seed 0 \
+  --dataset cifar10 \
+  --model ResNet18 \
+  --num-clients 10 \
+  --client-sample-ratio 0.6 \
+  --partition noniid \
+  --noniid-method dirichlet \
+  --dirichlet-beta 0.5 \
+  --num-rounds 200 \
+  --local_epochs 10 \
+  --batch-size 128 \
+  --lr 0.0001 \
+  --optimizer adam \
+  --fat-adversarial-ratio 0.5 \
+  --fat-warmup-rounds 0 \
+  --fat-warmup-adversarial-ratio 0.1 \
+  --pgd-epsilon 0.031372549 \
+  --pgd-step-size 0.007843137 \
+  --pgd-steps 10
+```
+
+result:
+![FedWeIT](cl_fcl_baseline/analyse/plot-robust/runs/fat/eval/accuracy.png)
+![FedWeIT](cl_fcl_baseline/analyse/plot-robust/runs/fat/eval/robust_accuracy.png)
+
+
+### **SFAT usage notes**
+
+`run_SFAT.py` uses the same local adversarial training step as FAT, then applies SFAT's slack-based client reweighting during aggregation.
+
+Method-specific options:
+- `--sfat-adversarial-ratio` target adversarial proportion in each local minibatch after warmup
+- `--sfat-warmup-rounds` number of initial rounds using the warmup adversarial ratio
+- `--sfat-warmup-adversarial-ratio` adversarial proportion used during warmup
+- `--sfat-alpha` SFAT slack factor for enhancing selected low-loss clients
+- `--sfat-enhanced-clients` number of clients upweighted in each round
+- `--sfat-loss-metric` ranking metric used by SFAT, such as `adv_ce_loss`, `ce_loss`, or `loss`
+
+Example:
+```bash
+python cl_fcl_baseline/experiments/robust/run_SFAT.py \
+  --seed 0 \
+  --dataset cifar10 \
+  --model ResNet18 \
+  --num-clients 10 \
+  --client-sample-ratio 0.6 \
+  --partition noniid \
+  --noniid-method dirichlet \
+  --dirichlet-beta 0.5 \
+  --num-rounds 200 \
+  --local_epochs 10 \
+  --batch-size 128 \
+  --lr 0.0001 \
+  --optimizer adam \
+  --sfat-adversarial-ratio 0.5 \
+  --sfat-warmup-rounds 0 \
+  --sfat-warmup-adversarial-ratio 0.1 \
+  --sfat-alpha 0.09090909 \
+  --sfat-enhanced-clients 1 \
+  --sfat-loss-metric adv_ce_loss \
+  --pgd-epsilon 0.031372549 \
+  --pgd-step-size 0.007843137 \
+  --pgd-steps 10
+```
+
+result:
+![FedWeIT](cl_fcl_baseline/analyse/plot-robust/runs/sfat/eval/accuracy.png)
+![FedWeIT](cl_fcl_baseline/analyse/plot-robust/runs/sfat/eval/robust_accuracy.png)
+
+### **CalFAT usage notes**
+
+`run_CalFAT.py` keeps FedAvg aggregation and uses calibrated adversarial supervision based on smoothed local class priors when training each client.
+
+Method-specific options:
+- `--calfat-prior-smoothing` smoothing constant added to each client class prior before calibration
+
+Example:
+```bash
+python cl_fcl_baseline/experiments/robust/run_CalFAT.py \
+  --seed 0 \
+  --dataset cifar10 \
+  --model ResNet18 \
+  --num-clients 10 \
+  --client-sample-ratio 0.6 \
+  --partition noniid \
+  --noniid-method dirichlet \
+  --dirichlet-beta 0.5 \
+  --num-rounds 200 \
+  --local_epochs 10 \
+  --batch-size 128 \
+  --lr 0.0001 \
+  --optimizer adam \
+  --calfat-prior-smoothing 1e-6 \
+  --pgd-epsilon 0.031372549 \
+  --pgd-step-size 0.007843137 \
+  --pgd-steps 10
+```
+
+result:
+![FedWeIT](cl_fcl_baseline/analyse/plot-robust/runs/calfat/eval/accuracy.png)
+![FedWeIT](cl_fcl_baseline/analyse/plot-robust/runs/calfat/eval/robust_accuracy.png)
+
+
+### **RBN usage notes**
+
+`run_RBN.py` implements a FedRBN-style mixed AT/ST setting: AT clients optimize a robust objective, ST clients receive propagated adversarial BatchNorm statistics, and optional pseudo-noise calibration can be enabled.
+
+Method-specific options:
+- `--rbn-at-ratio` fraction of clients treated as adversarial-training users
+- `--rbn-adv-lambda` weight on the adversarial loss term for AT users
+- `--rbn-src-weight-mode` propagation weighting for adversarial BatchNorm statistics, `eq` or `cos`
+- `--rbn-pnc` pseudo-noise calibration coefficient for ST users; `<0` disables PNC
+- `--rbn-pnc-warmup` number of initial rounds using zero PNC coefficient
+- `--rbn-attack-noised-bn` whether PGD for AT users uses the noised BatchNorm path
+
+`run_RBN.py` requires a BatchNorm-based backbone such as `VGG11`, `ResNet18`, `ResNet20`, or `ResNet32`; pure ViT backbones are not suitable here.
+
+Example:
+```bash
+python cl_fcl_baseline/experiments/robust/run_RBN.py \
+  --seed 0 \
+  --dataset cifar10 \
+  --model ResNet18 \
+  --num-clients 10 \
+  --client-sample-ratio 0.6 \
+  --partition noniid \
+  --noniid-method dirichlet \
+  --dirichlet-beta 0.5 \
+  --num-rounds 200 \
+  --local_epochs 10 \
+  --batch-size 128 \
+  --lr 0.0001 \
+  --optimizer adam \
+  --rbn-at-ratio 0.2 \
+  --rbn-adv-lambda 0.5 \
+  --rbn-src-weight-mode cos \
+  --rbn-pnc 0.5 \
+  --rbn-pnc-warmup 10 \
+  --pgd-epsilon 0.031372549 \
+  --pgd-step-size 0.007843137 \
+  --pgd-steps 10
+```
+
+result:
+![FedWeIT](cl_fcl_baseline/analyse/plot-robust/runs/rbn/eval/accuracy.png)
+![FedWeIT](cl_fcl_baseline/analyse/plot-robust/runs/rbn/eval/robust_accuracy.png)
+
+### **Sylva usage notes**
+
+`run_Sylva.py` combines class-balanced adversarial local training, similarity-aware aggregation, and a second benign refinement phase on selected layer groups after each round.
+
+Method-specific options:
+- `--sylva-class-balance-power` inverse-frequency exponent used for class-balanced weighting
+- `--sylva-class-balance-smoothing` smoothing constant added to local class counts
+- `--sylva-dynamic-rounds` number of rounds used to ramp from uniform to imbalance-aware class weights
+- `--sylva-clean-weight` weight on the clean cross-entropy term
+- `--sylva-adv-weight` weight on the adversarial cross-entropy term
+- `--sylva-kl-weight` weight on the TRADES-style KL consistency term
+- `--sylva-global-reg` strength of the local-to-global alignment penalty
+- `--sylva-agg-temperature` temperature scaling used by similarity-aware aggregation
+- `--sylva-agg-neighbors` number of nearest clients used for aggregation; `<=0` uses all peers
+- `--sylva-phase2-epochs` benign refinement epochs in the second phase
+- `--sylva-phase2-topk-layers` number of layer groups refined in the second phase
+- `--sylva-phase2-tradeoff` penalty weight for adversarial sensitivity during layer scoring
+- `--sylva-phase2-lr-scale` learning-rate multiplier for the second phase
+- `--sylva-phase2-max-batches` maximum batches used during layer scoring and benign refinement; `<=0` uses all batches
+
+Example:
+```bash
+python cl_fcl_baseline/experiments/robust/run_Sylva.py \
+  --seed 0 \
+  --dataset cifar10 \
+  --model ResNet18 \
+  --num-clients 10 \
+  --client-sample-ratio 0.6 \
+  --partition noniid \
+  --noniid-method dirichlet \
+  --dirichlet-beta 0.5 \
+  --num-rounds 200 \
+  --local_epochs 10 \
+  --batch-size 128 \
+  --lr 0.0001 \
+  --optimizer adam \
+  --sylva-class-balance-power 0.6 \
+  --sylva-class-balance-smoothing 1e-3 \
+  --sylva-dynamic-rounds 3 \
+  --sylva-clean-weight 0.8 \
+  --sylva-adv-weight 1.25 \
+  --sylva-kl-weight 8.0 \
+  --sylva-global-reg 1e-4 \
+  --sylva-agg-temperature 0.7 \
+  --sylva-agg-neighbors 2 \
+  --sylva-phase2-epochs 10 \
+  --sylva-phase2-topk-layers 1 \
+  --sylva-phase2-tradeoff 0.7 \
+  --sylva-phase2-lr-scale 0.0015 \
+  --sylva-phase2-max-batches 10 \
+  --pgd-epsilon 0.031372549 \
+  --pgd-step-size 0.007843137 \
+  --pgd-steps 10
+```
+
+result:
+![FedWeIT](cl_fcl_baseline/analyse/plot-robust/runs/sylva/eval/accuracy.png)
+![FedWeIT](cl_fcl_baseline/analyse/plot-robust/runs/sylva/eval/robust_accuracy.png)
+
 
 **FedWeIT usage notes**
 
@@ -134,7 +417,7 @@ python -m cl_fcl_baseline.experiments.run_FedWeIT \
   --dataset cifar100 \
   --model ResNet32 \
   --num-clients 5 \
-  --client-sample-ratio 0.4 \
+  --client-sample-ratio 1.0 \
   --partition noniid \
   --noniid-method dirichlet \
   --dirichlet-beta 0.5 \
@@ -166,11 +449,11 @@ FedWeIT-PGD keeps the FedWeIT optimization flow unchanged and adds PGD robust ev
 
 with robust accuracy:
 ```bash
-python -m cl_fcl_baseline.experiments.run_FedWeIT_PGD \
+python cl_fcl_baseline/experiments/FCL_robust/run_FedWeIT_PGD.py \
   --dataset cifar100 \
   --model ResNet32 \
   --num-clients 5 \
-  --client-sample-ratio 0.4 \
+  --client-sample-ratio 1.0 \
   --partition noniid \
   --noniid-method dirichlet \
   --dirichlet-beta 0.5 \
@@ -209,11 +492,11 @@ FedWeIT-FAT uses the same FedWeIT task/mask/knowledge-base flow, but each local 
 
 Example:
 ```bash
-python -m cl_fcl_baseline.experiments.run_FedWeIT_FAT \
+python cl_fcl_baseline/experiments/FCL_robust/run_FedWeIT_FAT.py \
   --dataset cifar100 \
   --model ResNet32 \
   --num-clients 5 \
-  --client-sample-ratio 0.4 \
+  --client-sample-ratio 1.0 \
   --partition noniid \
   --noniid-method dirichlet \
   --dirichlet-beta 0.5 \
@@ -254,11 +537,11 @@ FedWeIT-SFAT keeps the FedWeIT + adversarial-training local step, then applies S
 
 Example:
 ```bash
-python -m cl_fcl_baseline.experiments.run_FedWeIT_SFAT \
+python cl_fcl_baseline/experiments/FCL_robust/run_FedWeIT_SFAT.py \
   --dataset cifar100 \
   --model ResNet32 \
   --num-clients 5 \
-  --client-sample-ratio 0.4 \
+  --client-sample-ratio 1.0 \
   --partition noniid \
   --noniid-method dirichlet \
   --dirichlet-beta 0.5 \
@@ -294,11 +577,11 @@ FedWeIT-CalFAT keeps the FedWeIT task/mask/knowledge-base flow and uses calibrat
 
 Example:
 ```bash
-python -m cl_fcl_baseline.experiments.run_FedWeIT_CalFAT \
+python cl_fcl_baseline/experiments/FCL_robust/run_FedWeIT_CalFAT.py \
   --dataset cifar100 \
   --model ResNet32 \
   --num-clients 5 \
-  --client-sample-ratio 0.4 \
+  --client-sample-ratio 1.0 \
   --partition noniid \
   --noniid-method dirichlet \
   --dirichlet-beta 0.5 \
@@ -340,11 +623,11 @@ FedWeIT-RBN requires a BatchNorm-based backbone such as `VGG11`, `ResNet18`, `Re
 
 Example:
 ```bash
-python -m cl_fcl_baseline.experiments.run_FedWeIT_RBN \
+python cl_fcl_baseline/experiments/FCL_robust/run_FedWeIT_RBN.py \
   --dataset cifar100 \
   --model ResNet32 \
   --num-clients 5 \
-  --client-sample-ratio 0.4 \
+  --client-sample-ratio 1.0 \
   --partition noniid \
   --noniid-method dirichlet \
   --dirichlet-beta 0.5 \
@@ -392,11 +675,11 @@ FedWeIT-Sylva combines FedWeIT with Sylva-inspired personalized adversarial fine
 
 Example:
 ```bash
-python -m cl_fcl_baseline.experiments.run_FedWeIT_Sylva \
+python cl_fcl_baseline/experiments/FCL_robust/run_FedWeIT_Sylva.py \
   --dataset cifar100 \
   --model ResNet32 \
   --num-clients 5 \
-  --client-sample-ratio 0.4 \
+  --client-sample-ratio 1.0 \
   --partition noniid \
   --noniid-method dirichlet \
   --dirichlet-beta 0.5 \
@@ -450,7 +733,7 @@ Common options:
 - `--lr` learning rate
 - `--optimizer` `sgd` or `adam`
 - `--device` `cpu` | `cuda` | `cuda:0` | `auto`
-- `--model` `mlp` | `simplecnn` | `VGG11` | `ResNet18` | `ResNet20` | `ResNet32`
+- `--model` `mlp` | `simplecnn` | `VGG11` | `ResNet18` | `ResNet20` | `ResNet32` | `ViTTiny` | `ViTSmall` | `ViTBase`
 - `--eval-every` evaluation frequency (rounds)
 - `--log-file` JSONL log path (empty = auto)
 
@@ -492,7 +775,7 @@ Common options:
 - `--local_epochs` local epochs per round
 - `--batch-size` batch size
 - `--lr` learning rate
-- `--model` `mlp` | `simplecnn` | `VGG11` | `ResNet18` | `ResNet20` | `ResNet32`
+- `--model` `mlp` | `simplecnn` | `VGG11` | `ResNet18` | `ResNet20` | `ResNet32` | `ViTTiny` | `ViTSmall` | `ViTBase`
 - `--distill` enable client-side distillation
 - `--mutual-learning` enable deep mutual learning
 - `--server-distill-epochs` server distillation epochs
@@ -575,7 +858,7 @@ Common options:
 - `--lr` learning rate
 - `--optimizer` `sgd` or `adam`
 - `--device` `cpu` | `cuda` | `cuda:0` | `auto`
-- `--model` `mlp` | `simplecnn` | `VGG11` | `ResNet18` | `ResNet20` | `ResNet32`
+- `--model` `mlp` | `simplecnn` | `VGG11` | `ResNet18` | `ResNet20` | `ResNet32` | `ViTTiny` | `ViTSmall` | `ViTBase`
 - `--prox-mu` proximal term coefficient (mu)
 - `--eval-every` evaluation frequency (rounds)
 - `--log-file` JSONL log path (empty = auto)
@@ -645,7 +928,7 @@ Common options:
 - `--global-lr` global update step size for SCAFFOLD
 - `--optimizer` `sgd` or `adam`
 - `--device` `cpu` | `cuda` | `cuda:0` | `auto`
-- `--model` `mlp` | `simplecnn` | `VGG11` | `ResNet18` | `ResNet20` | `ResNet32`
+- `--model` `mlp` | `simplecnn` | `VGG11` | `ResNet18` | `ResNet20` | `ResNet32` | `ViTTiny` | `ViTSmall` | `ViTBase`
 - `--eval-every` evaluation frequency (rounds)
 - `--log-file` JSONL log path (empty = auto)
 
@@ -713,7 +996,7 @@ Common options:
 - `--lr` learning rate
 - `--optimizer` `sgd` or `adam`
 - `--device` `cpu` | `cuda` | `cuda:0` | `auto`
-- `--model` `mlp` | `simplecnn` | `VGG11` | `ResNet18` | `ResNet20` | `ResNet32`
+- `--model` `mlp` | `simplecnn` | `VGG11` | `ResNet18` | `ResNet20` | `ResNet32` | `ViTTiny` | `ViTSmall` | `ViTBase`
 - `--moon-temperature` contrastive temperature (tau)
 - `--moon-mu` weight of the contrastive term (mu)
 - `--eval-every` evaluation frequency (rounds)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass, field
+import random
 from typing import Dict, Iterable, List, Mapping, Sequence
 
 import torch
@@ -11,6 +12,8 @@ from torch.func import functional_call
 from torch.nn.modules.batchnorm import _BatchNorm
 
 from ..contracts import AggregationResult, ClientContext, MetricDict, StateDict, TrainResult
+from ..trainers.client import FederatedClient
+from ..trainers.server import FederatedServer
 from ..trainers.utils import detach_state_dict, move_to_device
 from .PGD import PGDConfig, pgd_linf_attack
 from .fedweit import (
@@ -152,10 +155,8 @@ def _collect_dual_bn_state_names(model: nn.Module) -> tuple[set[str], set[str]]:
         if not isinstance(module, DualNormLayer):
             continue
         prefix = f"{module_name}." if module_name else ""
-        if module.weight is not None:
-            parameter_names.add(prefix + "weight")
-        if module.bias is not None:
-            parameter_names.add(prefix + "bias")
+        # FedRBN only localizes the domain-specific BN statistics.
+        # The shared affine parameters belong to the globally aggregated model.
         for branch_name, branch in (("clean_bn", module.clean_bn), ("noise_bn", module.noise_bn)):
             branch_prefix = prefix + branch_name + "."
             for buffer_name, _ in branch.named_buffers(recurse=False):
@@ -183,6 +184,354 @@ def _client_local_bn_state(
     for name, value in buffers.items():
         state[name] = value.detach().cpu().clone()
     return state
+
+
+@dataclass
+class RBNClient(FederatedClient):
+    pgd_config: PGDConfig = field(default_factory=PGDConfig)
+    is_at_client: bool = True
+    adv_lambda: float = 0.5
+    pnc_coef: float = -1.0
+    pnc_warmup: int = 10
+    src_weight_mode: str = "cos"
+    attack_noised_bn: bool = True
+    local_bn_param_names: set[str] = field(init=False, default_factory=set)
+    local_bn_buffer_names: set[str] = field(init=False, default_factory=set)
+    local_bn_params: Dict[str, torch.Tensor] = field(default_factory=dict)
+    local_bn_buffers: Dict[str, torch.Tensor] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        self.local_bn_param_names, self.local_bn_buffer_names = _collect_dual_bn_state_names(self.trainer.model)
+
+    def prepare_local_bn(self, global_state: StateDict) -> None:
+        if not self.local_bn_params:
+            self.local_bn_params = {
+                name: value.detach().cpu().clone()
+                for name, value in global_state.items()
+                if name in self.local_bn_param_names and isinstance(value, torch.Tensor)
+            }
+        if not self.local_bn_buffers:
+            self.local_bn_buffers = {
+                name: value.detach().cpu().clone()
+                for name, value in global_state.items()
+                if name in self.local_bn_buffer_names and isinstance(value, torch.Tensor)
+            }
+
+    def local_bn_state_dict(self) -> Dict[str, torch.Tensor]:
+        return _client_local_bn_state(self.local_bn_params, self.local_bn_buffers)
+
+    def duplicate_clean_to_noise_bn(self) -> None:
+        for name in list(self.local_bn_buffers.keys()):
+            if ".noise_bn." not in name:
+                continue
+            clean_name = name.replace(".noise_bn.", ".clean_bn.")
+            if clean_name in self.local_bn_buffers:
+                self.local_bn_buffers[name] = self.local_bn_buffers[clean_name].detach().clone()
+
+    def propagate_noise_bn(
+        self,
+        source_states: Sequence[Mapping[str, torch.Tensor]],
+        src_weight_mode: str = "cos",
+    ) -> None:
+        if not self.local_bn_buffers:
+            return
+        if not source_states:
+            self.duplicate_clean_to_noise_bn()
+            return
+
+        dst_state = self.local_bn_state_dict()
+        candidates: dict[str, List[torch.Tensor]] = defaultdict(list)
+        layer_scores: dict[str, List[torch.Tensor]] = defaultdict(list)
+        found_noise_bn = False
+
+        for src_state in source_states:
+            for clean_key, dst_clean in dst_state.items():
+                if ".clean_bn." not in clean_key:
+                    continue
+                if "running_mean" not in clean_key and "running_var" not in clean_key:
+                    continue
+                noise_key = clean_key.replace(".clean_bn.", ".noise_bn.")
+                if clean_key not in src_state or noise_key not in src_state:
+                    continue
+                found_noise_bn = True
+                candidates[noise_key].append(src_state[noise_key].detach().cpu().clone())
+
+                if "running_mean" in clean_key:
+                    mean_key = clean_key
+                    var_key = clean_key.replace("running_mean", "running_var")
+                else:
+                    mean_key = clean_key.replace("running_var", "running_mean")
+                    var_key = clean_key
+                if mean_key not in src_state or var_key not in src_state or mean_key not in dst_state or var_key not in dst_state:
+                    continue
+                if src_weight_mode.lower() == "cos":
+                    score = (
+                        F.cosine_similarity(
+                            src_state[mean_key].detach().float().reshape(-1),
+                            dst_clean.detach().float().reshape(-1),
+                            dim=0,
+                            eps=1e-8,
+                        )
+                        + F.cosine_similarity(
+                            src_state[var_key].detach().float().reshape(-1),
+                            dst_state[var_key].detach().float().reshape(-1),
+                            dim=0,
+                            eps=1e-8,
+                        )
+                    ) * 50.0
+                    layer_scores[noise_key].append(score)
+
+        if not found_noise_bn:
+            self.duplicate_clean_to_noise_bn()
+            return
+
+        if src_weight_mode.lower() == "eq":
+            source_weights = torch.full(
+                (len(source_states),),
+                1.0 / max(1, len(source_states)),
+                dtype=torch.float32,
+            )
+        elif src_weight_mode.lower() == "cos":
+            per_layer: List[torch.Tensor] = []
+            for noise_key in sorted(layer_scores.keys()):
+                per_layer.append(torch.stack(layer_scores[noise_key], dim=0))
+            stacked = torch.stack(per_layer, dim=1).mean(dim=1)
+            source_weights = torch.softmax(stacked, dim=0)
+        else:
+            raise ValueError(f"Unsupported src_weight_mode: {src_weight_mode}")
+
+        for noise_key, values in candidates.items():
+            if noise_key not in self.local_bn_buffers or len(values) == 0:
+                continue
+            mixed = torch.zeros_like(self.local_bn_buffers[noise_key])
+            for value, weight in zip(values, source_weights):
+                mixed = mixed + value.to(mixed.device, mixed.dtype) * float(weight.item())
+            self.local_bn_buffers[noise_key] = mixed.detach().cpu().clone()
+
+    def _pnc_value(self, round_idx: int | None) -> float:
+        if float(self.pnc_coef) < 0.0:
+            return 0.0
+        if round_idx is not None and int(round_idx) < int(self.pnc_warmup):
+            return 0.0
+        return float(self.pnc_coef)
+
+    def build_eval_state(self, global_state: StateDict) -> Dict[str, torch.Tensor]:
+        state = _clone_tensor_state(global_state)
+        state.update(self.local_bn_state_dict())
+        return state
+
+    def fit(self, global_state: StateDict, context: ClientContext) -> TrainResult:
+        self.prepare_local_bn(global_state)
+        self.trainer.model.load_state_dict(self.build_eval_state(global_state), strict=True)
+        self.trainer.model.to(self.trainer.device)
+        self.trainer.model.train()
+        optimizer = self.trainer.optimizer
+        pnc_value = self._pnc_value(context.round_idx)
+
+        total_examples = 0
+        total_loss = 0.0
+        total_clean_ce = 0.0
+        total_adv_ce = 0.0
+        total_pnc_ce = 0.0
+        total_correct = 0
+
+        for _ in range(int(self.epochs)):
+            for inputs, targets in self.train_loader:
+                inputs = move_to_device(inputs, self.trainer.device)
+                targets = move_to_device(targets, self.trainer.device)
+
+                set_dual_bn_mode(self.trainer.model, False)
+                clean_logits = self.trainer.model(inputs)
+                clean_ce_loss = F.cross_entropy(clean_logits, targets)
+
+                adv_ce_loss = torch.tensor(0.0, device=self.trainer.device)
+                pnc_ce_loss = torch.tensor(0.0, device=self.trainer.device)
+                if self.is_at_client:
+                    set_dual_bn_mode(self.trainer.model, bool(self.attack_noised_bn))
+                    was_training = self.trainer.model.training
+                    self.trainer.model.eval()
+                    try:
+                        adversarial_inputs = pgd_linf_attack(
+                            self.trainer.model,
+                            inputs,
+                            targets,
+                            self.pgd_config,
+                        )
+                    finally:
+                        if was_training:
+                            self.trainer.model.train()
+                    set_dual_bn_mode(self.trainer.model, True)
+                    adv_logits = self.trainer.model(adversarial_inputs)
+                    adv_ce_loss = F.cross_entropy(adv_logits, targets)
+                    loss = (1.0 - float(self.adv_lambda)) * clean_ce_loss + float(self.adv_lambda) * adv_ce_loss
+                    prediction_logits = adv_logits
+                else:
+                    if pnc_value > 0.0:
+                        set_dual_bn_mode(self.trainer.model, True)
+                        set_dual_bn_noise_training(self.trainer.model, False)
+                        try:
+                            noise_logits = self.trainer.model(inputs)
+                        finally:
+                            set_dual_bn_noise_training(self.trainer.model, True)
+                        pnc_ce_loss = F.cross_entropy(noise_logits, targets)
+                        loss = (1.0 - pnc_value) * clean_ce_loss + pnc_value * pnc_ce_loss
+                    else:
+                        loss = clean_ce_loss
+                    prediction_logits = clean_logits
+
+                set_dual_bn_mode(self.trainer.model, False)
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
+                batch_size = int(targets.shape[0])
+                total_examples += batch_size
+                total_loss += float(loss.detach().item()) * batch_size
+                total_clean_ce += float(clean_ce_loss.detach().item()) * batch_size
+                total_adv_ce += float(adv_ce_loss.detach().item()) * batch_size
+                total_pnc_ce += float(pnc_ce_loss.detach().item()) * batch_size
+                total_correct += int((prediction_logits.argmax(dim=1) == targets).sum().item())
+
+        full_state = detach_state_dict(self.trainer.model.state_dict())
+        self.local_bn_params = {
+            name: value.detach().cpu().clone()
+            for name, value in full_state.items()
+            if name in self.local_bn_param_names
+        }
+        self.local_bn_buffers = {
+            name: value.detach().cpu().clone()
+            for name, value in full_state.items()
+            if name in self.local_bn_buffer_names
+        }
+
+        if total_examples == 0:
+            metrics: MetricDict = {
+                "loss": 0.0,
+                "clean_ce_loss": 0.0,
+                "adv_ce_loss": 0.0,
+                "pnc_ce_loss": 0.0,
+                "accuracy": 0.0,
+                "rbn_is_at_client": 1.0 if self.is_at_client else 0.0,
+                "rbn_pnc_coef": float(pnc_value),
+            }
+        else:
+            metrics = {
+                "loss": total_loss / total_examples,
+                "clean_ce_loss": total_clean_ce / total_examples,
+                "adv_ce_loss": total_adv_ce / total_examples,
+                "pnc_ce_loss": total_pnc_ce / total_examples,
+                "accuracy": total_correct / total_examples,
+                "rbn_is_at_client": 1.0 if self.is_at_client else 0.0,
+                "rbn_pnc_coef": float(pnc_value),
+            }
+        return TrainResult(
+            client_id=self.client_id,
+            num_samples=len(self.train_loader.dataset),
+            metrics=metrics,
+            payload={"model_state": full_state},
+        )
+
+
+@dataclass
+class RBNAggregator:
+    exclude_names: set[str]
+    metric_prefix: str = "client_"
+
+    def aggregate(self, client_results: List[TrainResult]) -> AggregationResult:
+        if not client_results:
+            return AggregationResult(global_state={}, metrics={"num_clients": 0.0, "total_samples": 0.0})
+
+        total_samples = 0
+        accumulator: Dict[str, torch.Tensor] = {}
+        metric_sums: Dict[str, float] = {}
+        metric_weights: Dict[str, float] = {}
+
+        for result in client_results:
+            state = result.payload.get("model_state", {})
+            if not isinstance(state, Mapping):
+                continue
+            weight = max(int(result.num_samples), 0)
+            if weight == 0:
+                continue
+            total_samples += weight
+            for name, tensor in state.items():
+                if name in self.exclude_names or not isinstance(tensor, torch.Tensor):
+                    continue
+                if tensor.is_floating_point():
+                    weighted_tensor = tensor.detach().float() * float(weight)
+                    if name not in accumulator:
+                        accumulator[name] = weighted_tensor
+                    else:
+                        accumulator[name] += weighted_tensor
+                elif name not in accumulator:
+                    accumulator[name] = tensor.detach().clone()
+            for metric_name, metric_value in result.metrics.items():
+                metric_sums[metric_name] = metric_sums.get(metric_name, 0.0) + float(metric_value) * float(weight)
+                metric_weights[metric_name] = metric_weights.get(metric_name, 0.0) + float(weight)
+
+        averaged_state = {
+            name: (
+                tensor / float(total_samples)
+                if tensor.is_floating_point()
+                else tensor.detach().clone()
+            )
+            for name, tensor in accumulator.items()
+        }
+        averaged_metrics = {
+            f"{self.metric_prefix}{metric_name}": metric_sums[metric_name] / metric_weights[metric_name]
+            for metric_name in metric_sums
+            if metric_weights.get(metric_name, 0.0) > 0.0
+        }
+        averaged_metrics["num_clients"] = float(len(client_results))
+        averaged_metrics["total_samples"] = float(total_samples)
+        return AggregationResult(
+            global_state=averaged_state,
+            metrics=averaged_metrics,
+            metadata={"aggregator": "rbn"},
+        )
+
+
+@dataclass
+class RBNServer(FederatedServer):
+    src_weight_mode: str = "cos"
+    propagate_before_training: bool = True
+
+    def _propagate_noise_bn(self, global_state: StateDict) -> None:
+        at_clients = [
+            client
+            for client in self.clients
+            if isinstance(client, RBNClient) and client.is_at_client
+        ]
+        for client in self.clients:
+            if isinstance(client, RBNClient):
+                client.prepare_local_bn(global_state)
+        source_states = [
+            client.local_bn_state_dict()
+            for client in at_clients
+            if client.local_bn_buffers
+        ]
+        for client in self.clients:
+            if isinstance(client, RBNClient) and not client.is_at_client:
+                client.propagate_noise_bn(source_states, src_weight_mode=self.src_weight_mode)
+
+    def run_round(self, round_idx: int) -> AggregationResult:
+        global_state = self.get_global_state()
+        if self.propagate_before_training:
+            self._propagate_noise_bn(global_state)
+        client_results: List[TrainResult] = []
+        clients = list(self.clients)
+        if clients and self.client_sample_ratio < 1.0:
+            num_selected = max(1, int(len(clients) * self.client_sample_ratio))
+            clients = random.sample(clients, k=num_selected)
+        for client in clients:
+            context = ClientContext(client_id=client.client_id, round_idx=round_idx)
+            client_results.append(client.fit(global_state, context))
+        aggregation_result = self.aggregator.aggregate(client_results)
+        if aggregation_result.global_state:
+            merged_state = self.get_global_state()
+            merged_state.update(aggregation_result.global_state)
+            self.set_global_state(merged_state)
+        return aggregation_result
 
 
 @dataclass
@@ -216,7 +565,7 @@ class FedWeITRBNClient(FedWeITClient):
     def _pnc_value(self, round_idx: int | None) -> float:
         if float(self.pnc_coef) < 0.0:
             return 0.0
-        if round_idx is not None and int(round_idx) <= int(self.pnc_warmup):
+        if round_idx is not None and int(round_idx) < int(self.pnc_warmup):
             return 0.0
         return float(self.pnc_coef)
 

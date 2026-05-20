@@ -9,6 +9,7 @@ from torch.func import functional_call
 from torch.utils.data import DataLoader
 
 from ..contracts import AggregationResult, ClientContext, MetricDict, StateDict, TaskDefinition, TrainResult
+from ..trainers.client import FederatedClient
 from ..trainers.utils import detach_state_dict, move_to_device
 from .PGD import PGDConfig, pgd_linf_attack
 from .fedweit import FedWeITAggregator, FedWeITClient, FedWeITServer, _state_l2_norm, _state_nnz, _state_numel
@@ -106,6 +107,384 @@ def _layer_group_name(parameter_name: str) -> str:
     if "." not in parameter_name:
         return parameter_name
     return parameter_name.rsplit(".", 1)[0]
+
+
+@dataclass
+class SylvaClient(FederatedClient):
+    pgd_config: PGDConfig = field(default_factory=PGDConfig)
+    num_classes: int = 10
+    class_balance_power: float = 0.6
+    class_balance_smoothing: float = 1e-3
+    dynamic_weight_rounds: int = 3
+    clean_loss_weight: float = 0.8
+    adv_loss_weight: float = 1.25
+    kl_weight: float = 8.0
+    global_reg: float = 1e-4
+    phase2_epochs: int = 1
+    phase2_topk_layers: int = 1
+    phase2_tradeoff: float = 0.7
+    phase2_lr_scale: float = 0.15
+    phase2_max_batches: int = 1
+    class_histogram: torch.Tensor | None = None
+    phase2_selected_layers: List[str] = field(default_factory=list)
+
+    def _class_counts(self) -> torch.Tensor:
+        if self.class_histogram is not None:
+            return self.class_histogram.detach().clone()
+        counts = torch.full((int(self.num_classes),), float(self.class_balance_smoothing), dtype=torch.float32)
+        dataset = self.train_loader.dataset
+        for index in range(len(dataset)):
+            _, target = dataset[index]
+            target_value = int(target.item()) if isinstance(target, torch.Tensor) else int(target)
+            if 0 <= target_value < counts.numel():
+                counts[target_value] += 1.0
+        self.class_histogram = counts.detach().cpu().clone()
+        return self.class_histogram.detach().clone()
+
+    def _class_weights(self, round_idx: int | None) -> torch.Tensor:
+        counts = self._class_counts().to(self.trainer.device)
+        inverse_frequency = (counts.sum() / counts.clamp_min(float(self.class_balance_smoothing))).pow(
+            float(self.class_balance_power)
+        )
+        inverse_frequency = inverse_frequency / inverse_frequency.mean().clamp_min(1e-12)
+        if round_idx is None:
+            blend = 1.0
+        else:
+            blend = min(1.0, float(round_idx + 1) / max(1, int(self.dynamic_weight_rounds)))
+        return torch.ones_like(inverse_frequency).lerp(inverse_frequency, blend)
+
+    def _global_alignment_loss(self, global_anchor: Dict[str, torch.Tensor]) -> torch.Tensor:
+        losses = []
+        for name, parameter in self.trainer.model.named_parameters():
+            if parameter.is_floating_point() and name in global_anchor:
+                losses.append(torch.sum(torch.square(parameter - global_anchor[name])))
+        if losses:
+            return torch.stack(losses).sum()
+        return torch.tensor(0.0, device=self.trainer.device)
+
+    def _build_phase2_optimizer(self, params: Sequence[torch.nn.Parameter]) -> torch.optim.Optimizer:
+        lr = float(self.trainer.optimizer.param_groups[0].get("lr", 1e-3))
+        lr *= max(float(self.phase2_lr_scale), 1e-6)
+        weight_decay = float(self.trainer.optimizer.param_groups[0].get("weight_decay", 0.0))
+        if isinstance(self.trainer.optimizer, torch.optim.Adam):
+            return torch.optim.Adam(params, lr=lr, weight_decay=weight_decay)
+        return torch.optim.SGD(
+            params,
+            lr=lr,
+            momentum=float(self.trainer.optimizer.param_groups[0].get("momentum", 0.0)),
+            weight_decay=weight_decay,
+        )
+
+    def _run_phase2(self, class_weights: torch.Tensor) -> None:
+        if int(self.phase2_epochs) <= 0 or int(self.phase2_topk_layers) <= 0:
+            self.phase2_selected_layers = []
+            return
+
+        ordered_items = [
+            (name, parameter)
+            for name, parameter in self.trainer.model.named_parameters()
+            if parameter.requires_grad
+        ]
+        if not ordered_items:
+            self.phase2_selected_layers = []
+            return
+
+        score_sums: Dict[str, float] = {}
+        max_batches = None if int(self.phase2_max_batches) <= 0 else int(self.phase2_max_batches)
+        ordered_names = [name for name, _ in ordered_items]
+        ordered_params = [parameter for _, parameter in ordered_items]
+
+        for batch_idx, (inputs, targets) in enumerate(self.train_loader):
+            if max_batches is not None and batch_idx >= max_batches:
+                break
+            inputs = move_to_device(inputs, self.trainer.device)
+            targets = move_to_device(targets, self.trainer.device)
+            clean_logits = self.trainer.model(inputs)
+            clean_loss = F.cross_entropy(clean_logits, targets, weight=class_weights)
+
+            was_training = self.trainer.model.training
+            self.trainer.model.eval()
+            try:
+                adversarial_inputs = _trades_pgd_linf_attack(
+                    self.trainer.model,
+                    inputs,
+                    clean_logits,
+                    self.pgd_config,
+                )
+            finally:
+                if was_training:
+                    self.trainer.model.train()
+            adversarial_logits = self.trainer.model(adversarial_inputs)
+            adversarial_loss = F.cross_entropy(adversarial_logits, targets, weight=class_weights)
+
+            clean_grads = torch.autograd.grad(clean_loss, ordered_params, retain_graph=True, allow_unused=True)
+            adv_grads = torch.autograd.grad(adversarial_loss, ordered_params, allow_unused=True)
+            for name, clean_grad, adv_grad in zip(ordered_names, clean_grads, adv_grads):
+                group_name = _layer_group_name(name)
+                clean_norm = 0.0 if clean_grad is None else float(clean_grad.detach().norm().item())
+                adv_norm = 0.0 if adv_grad is None else float(adv_grad.detach().norm().item())
+                score_sums[group_name] = score_sums.get(group_name, 0.0) + clean_norm - (
+                    float(self.phase2_tradeoff) * adv_norm
+                )
+
+        if not score_sums:
+            self.phase2_selected_layers = []
+            return
+
+        selected_groups = [
+            group_name
+            for group_name, _ in sorted(score_sums.items(), key=lambda item: (-item[1], item[0]))[
+                : max(1, int(self.phase2_topk_layers))
+            ]
+        ]
+        selected = set(selected_groups)
+        selected_params = [
+            parameter
+            for name, parameter in ordered_items
+            if _layer_group_name(name) in selected
+        ]
+        if not selected_params:
+            self.phase2_selected_layers = []
+            return
+
+        optimizer = self._build_phase2_optimizer(selected_params)
+        for _ in range(int(self.phase2_epochs)):
+            for batch_idx, (inputs, targets) in enumerate(self.train_loader):
+                if max_batches is not None and batch_idx >= max_batches:
+                    break
+                inputs = move_to_device(inputs, self.trainer.device)
+                targets = move_to_device(targets, self.trainer.device)
+                logits = self.trainer.model(inputs)
+                loss = F.cross_entropy(logits, targets, weight=class_weights)
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+        self.phase2_selected_layers = selected_groups
+
+    def fit(self, global_state: StateDict, context: ClientContext) -> TrainResult:
+        self.trainer.model.load_state_dict(global_state, strict=True)
+        self.trainer.model.to(self.trainer.device)
+        self.trainer.model.train()
+        optimizer = self.trainer.optimizer
+        class_weights = self._class_weights(context.round_idx)
+        global_anchor = {
+            name: value.detach().to(self.trainer.device)
+            for name, value in global_state.items()
+            if isinstance(value, torch.Tensor) and value.is_floating_point()
+        }
+
+        total_examples = 0
+        total_loss = 0.0
+        total_clean_ce = 0.0
+        total_adv_ce = 0.0
+        total_kl = 0.0
+        total_alignment = 0.0
+        total_correct = 0
+
+        for _ in range(int(self.epochs)):
+            for inputs, targets in self.train_loader:
+                inputs = move_to_device(inputs, self.trainer.device)
+                targets = move_to_device(targets, self.trainer.device)
+
+                clean_logits = self.trainer.model(inputs)
+                was_training = self.trainer.model.training
+                self.trainer.model.eval()
+                try:
+                    adversarial_inputs = _trades_pgd_linf_attack(
+                        self.trainer.model,
+                        inputs,
+                        clean_logits,
+                        self.pgd_config,
+                    )
+                finally:
+                    if was_training:
+                        self.trainer.model.train()
+                adversarial_logits = self.trainer.model(adversarial_inputs)
+
+                clean_ce_loss = F.cross_entropy(clean_logits, targets, weight=class_weights)
+                adv_ce_loss = F.cross_entropy(adversarial_logits, targets, weight=class_weights)
+                robust_kl_loss = F.kl_div(
+                    F.log_softmax(adversarial_logits, dim=1),
+                    torch.softmax(clean_logits.detach(), dim=1),
+                    reduction="batchmean",
+                )
+                alignment_loss = self._global_alignment_loss(global_anchor)
+                loss = (
+                    float(self.clean_loss_weight) * clean_ce_loss
+                    + float(self.adv_loss_weight) * adv_ce_loss
+                    + float(self.kl_weight) * robust_kl_loss
+                    + float(self.global_reg) * alignment_loss
+                )
+
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
+                batch_size = int(targets.shape[0])
+                total_examples += batch_size
+                total_loss += float(loss.detach().item()) * batch_size
+                total_clean_ce += float(clean_ce_loss.detach().item()) * batch_size
+                total_adv_ce += float(adv_ce_loss.detach().item()) * batch_size
+                total_kl += float(robust_kl_loss.detach().item()) * batch_size
+                total_alignment += float(alignment_loss.detach().item()) * batch_size
+                total_correct += int((adversarial_logits.argmax(dim=1) == targets).sum().item())
+
+        phase1_state = detach_state_dict(self.trainer.model.state_dict())
+        self._run_phase2(class_weights)
+        personalized_state = detach_state_dict(self.trainer.model.state_dict())
+        class_weight_min = float(class_weights.min().item()) if class_weights.numel() > 0 else 0.0
+        class_weight_max = float(class_weights.max().item()) if class_weights.numel() > 0 else 0.0
+        if total_examples == 0:
+            metrics: MetricDict = {
+                "loss": 0.0,
+                "clean_ce_loss": 0.0,
+                "adv_ce_loss": 0.0,
+                "robust_kl_loss": 0.0,
+                "alignment_loss": 0.0,
+                "accuracy": 0.0,
+                "class_weight_min": class_weight_min,
+                "class_weight_max": class_weight_max,
+                "phase2_selected_layers": float(len(self.phase2_selected_layers)),
+            }
+        else:
+            metrics = {
+                "loss": total_loss / total_examples,
+                "clean_ce_loss": total_clean_ce / total_examples,
+                "adv_ce_loss": total_adv_ce / total_examples,
+                "robust_kl_loss": total_kl / total_examples,
+                "alignment_loss": total_alignment / total_examples,
+                "accuracy": total_correct / total_examples,
+                "class_weight_min": class_weight_min,
+                "class_weight_max": class_weight_max,
+                "phase2_selected_layers": float(len(self.phase2_selected_layers)),
+            }
+        return TrainResult(
+            client_id=self.client_id,
+            num_samples=len(self.train_loader.dataset),
+            metrics=metrics,
+            payload={
+                "model_state": phase1_state,
+                "personalized_state": personalized_state,
+            },
+        )
+
+
+@dataclass
+class SylvaAggregator:
+    metric_prefix: str = "client_"
+    temperature: float = 0.7
+    neighbors: int = 2
+
+    def aggregate(self, client_results: List[TrainResult]) -> AggregationResult:
+        if not client_results:
+            return AggregationResult(global_state={}, metrics={"num_clients": 0.0, "total_samples": 0.0})
+
+        sample_counts = {
+            result.client_id: float(max(int(result.num_samples), 0))
+            for result in client_results
+        }
+        states = {
+            result.client_id: result.payload.get("model_state", {})
+            for result in client_results
+            if isinstance(result.payload.get("model_state", {}), dict)
+        }
+        vectors = {
+            client_id: _flatten_state(state)
+            for client_id, state in states.items()
+        }
+
+        if len(vectors) <= 1:
+            similarities = {client_id: 1.0 for client_id in states}
+            client_weights = {
+                client_id: max(sample_counts.get(client_id, 1.0), 1.0)
+                for client_id in states
+            }
+        else:
+            pairwise: Dict[str, List[float]] = {client_id: [] for client_id in vectors}
+            all_distances: List[float] = []
+            client_ids = list(vectors.keys())
+            for idx, client_id in enumerate(client_ids):
+                for other_id in client_ids[idx + 1 :]:
+                    distance = float(torch.norm(vectors[client_id] - vectors[other_id], p=2).item())
+                    pairwise[client_id].append(distance)
+                    pairwise[other_id].append(distance)
+                    if distance > 0.0:
+                        all_distances.append(distance)
+            scale = float(torch.tensor(all_distances, dtype=torch.float32).median().item()) if all_distances else 1.0
+            scale = max(scale * max(float(self.temperature), 1e-6), 1e-12)
+            similarities = {}
+            client_weights = {}
+            for client_id in client_ids:
+                distances = sorted(pairwise.get(client_id, []))
+                if not distances:
+                    similarity = 1.0
+                else:
+                    if int(self.neighbors) > 0:
+                        distances = distances[: min(len(distances), int(self.neighbors))]
+                    similarity = float(torch.exp(-torch.tensor(distances, dtype=torch.float32) / scale).mean().item())
+                similarities[client_id] = similarity
+                client_weights[client_id] = max(sample_counts.get(client_id, 1.0), 1.0) * similarity
+            if all(weight <= 0.0 for weight in client_weights.values()):
+                client_weights = {
+                    client_id: max(sample_counts.get(client_id, 1.0), 1.0)
+                    for client_id in client_ids
+                }
+
+        accumulators: Dict[str, torch.Tensor] = {}
+        total_weights: Dict[str, float] = {}
+        metric_sums: Dict[str, float] = {}
+        metric_weights: Dict[str, float] = {}
+        for result in client_results:
+            state = result.payload.get("model_state", {})
+            if not isinstance(state, dict):
+                continue
+            weight = float(client_weights.get(result.client_id, 1.0))
+            for name, tensor in state.items():
+                if not isinstance(tensor, torch.Tensor):
+                    continue
+                if tensor.is_floating_point():
+                    if name not in accumulators:
+                        accumulators[name] = tensor.detach().float() * weight
+                        total_weights[name] = weight
+                    else:
+                        accumulators[name] += tensor.detach().float() * weight
+                        total_weights[name] += weight
+                elif name not in accumulators:
+                    accumulators[name] = tensor.detach().clone()
+                    total_weights[name] = 1.0
+            sample_weight = float(max(int(result.num_samples), 0))
+            for metric_name, metric_value in result.metrics.items():
+                metric_sums[metric_name] = metric_sums.get(metric_name, 0.0) + float(metric_value) * sample_weight
+                metric_weights[metric_name] = metric_weights.get(metric_name, 0.0) + sample_weight
+
+        averaged_state = {
+            name: (
+                tensor / max(total_weights.get(name, 0.0), 1e-12)
+                if tensor.is_floating_point()
+                else tensor.detach().clone()
+            )
+            for name, tensor in accumulators.items()
+        }
+        averaged_metrics = {
+            f"{self.metric_prefix}{metric_name}": metric_sums[metric_name] / metric_weights[metric_name]
+            for metric_name in metric_sums
+            if metric_weights.get(metric_name, 0.0) > 0.0
+        }
+        averaged_metrics["num_clients"] = float(len(client_results))
+        averaged_metrics["total_samples"] = float(sum(max(int(result.num_samples), 0) for result in client_results))
+        averaged_metrics["sylva_similarity_min"] = float(min(similarities.values())) if similarities else 0.0
+        averaged_metrics["sylva_similarity_max"] = float(max(similarities.values())) if similarities else 0.0
+        return AggregationResult(
+            global_state=averaged_state,
+            metrics=averaged_metrics,
+            metadata={
+                "aggregator": "sylva",
+                "sylva_client_weights": dict(client_weights),
+                "sylva_client_similarities": dict(similarities),
+                "sylva_temperature": float(self.temperature),
+                "sylva_neighbors": float(max(int(self.neighbors), 0)),
+            },
+        )
 
 
 @dataclass

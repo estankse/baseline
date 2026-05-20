@@ -1,0 +1,44 @@
+{
+  "log_file": "E:\\cc\\Keras\\github\\CL-FCL\\cl_fcl_baseline\\experiments\\robust\\logs\\sylva_20260508_002802.jsonl",
+  "method": "sylva",
+  "num_train_records": 45,
+  "num_eval_records": 45,
+  "final_eval": {
+    "accuracy": 0.3751,
+    "loss": 2.6772313400268555,
+    "robust_accuracy": 0.1645,
+    "robust_loss": 4.0082673126220705,
+    "num_pgd_batches": 79.0,
+    "num_pgd_samples": 10000.0
+  },
+  "best_eval": {
+    "accuracy": 0.3816,
+    "loss": 2.6277159854888916,
+    "robust_accuracy": 0.1645,
+    "robust_loss": 3.8941823051452635
+  },
+  "pgd_config": {
+    "epsilon": 0.03137254901960784,
+    "step_size": 0.00784313725490196,
+    "steps": 10,
+    "random_start": true,
+    "normalized_space": false,
+    "max_batches": 0
+  },
+  "method_config": {
+    "class_balance_power": 0.6,
+    "class_balance_smoothing": 0.001,
+    "dynamic_rounds": 3,
+    "clean_weight": 0.8,
+    "adv_weight": 1.25,
+    "kl_weight": 8.0,
+    "global_reg": 0.0001,
+    "agg_temperature": 0.7,
+    "agg_neighbors": 2,
+    "phase2_epochs": 10,
+    "phase2_topk_layers": 1,
+    "phase2_tradeoff": 0.7,
+    "phase2_lr_scale": 0.0015,
+    "phase2_max_batches": 10
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "log_file": "E:\\cc\\Keras\\github\\CL-FCL\\cl_fcl_baseline\\experiments\\robust\\logs\\rbn_20260508_235611.jsonl",
+  "method": "rbn",
+  "num_train_records": 33,
+  "num_eval_records": 33,
+  "final_eval": {
+    "accuracy": 0.42476,
+    "loss": 2.575011424751282,
+    "robust_accuracy": 0.13658,
+    "robust_loss": 5.7877736479187,
+    "num_eval_clients": 10.0,
+    "num_eval_samples": 10000.0,
+    "num_pgd_batches": 79.0,
+    "num_pgd_samples": 10000.0
+  },
+  "best_eval": {
+    "accuracy": 0.43002,
+    "loss": 2.4352257986831662,
+    "robust_accuracy": 0.14148,
+    "robust_loss": 4.295877056198121
+  },
+  "pgd_config": {
+    "epsilon": 0.03137254901960784,
+    "step_size": 0.00784313725490196,
+    "steps": 10,
+    "random_start": true,
+    "normalized_space": false,
+    "max_batches": 0
+  },
+  "method_config": {
+    "at_ratio": 1.0,
+    "at_clients": [
+      "client_0",
+      "client_1",
+      "client_2",
+      "client_3",
+      "client_4",
+      "client_5",
+      "client_6",
+      "client_7",
+      "client_8",
+      "client_9"
+    ],
+    "adv_lambda": 0.5,
+    "src_weight_mode": "cos",
+    "pnc": 0.5,
+    "pnc_warmup": 10,
+    "attack_noised_bn": true
+  }
+}
