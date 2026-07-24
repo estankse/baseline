@@ -7,8 +7,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 
 
-DEFAULT_LOG_DIR = Path(__file__).resolve().parents[1] / "experiments" / "robust" / "logs"
-DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parent / "plot-robust"
+DEFAULT_LOG_DIR = Path(__file__).resolve().parents[1] / "experiments" / "FL_robust" / "logs"
+DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parent / "plot-FL_robust"
 PRIORITY_METRICS = [
     "loss",
     "accuracy",
@@ -257,7 +257,7 @@ def analyse_log_directory(log_dir: Path, output_dir: Path) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Analyse standalone robust experiment logs.")
+    parser = argparse.ArgumentParser(description="Analyse standalone FL_robust experiment logs.")
     parser.add_argument("--log-dir", type=Path, default=DEFAULT_LOG_DIR)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     return parser

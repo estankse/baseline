@@ -9,7 +9,6 @@ from torch.utils.data import Subset
 
 from cl_fcl_baseline.algorithms.fl import FedAvgAggregator
 from cl_fcl_baseline.algorithms.fedkem import (
-    DistillMLP,
     DistillationConfig,
     FedKEMClient,
     FedKEMServerAggregator,
@@ -22,8 +21,7 @@ from cl_fcl_baseline.datasets.build import (
     partition_dataset_iid,
     partition_dataset_noniid,
 )
-from cl_fcl_baseline.models import ResNet18, ResNet20, ResNet32, VGG11
-from cl_fcl_baseline.models.simple_model import MLPClassifier, SimpleCNN
+from cl_fcl_baseline.models import build_model_from_args
 from cl_fcl_baseline.trainers.client import FederatedClient
 from cl_fcl_baseline.trainers.server import FederatedExperiment, FederatedServer
 from cl_fcl_baseline.trainers.trainer import BaseTrainer
@@ -96,37 +94,7 @@ def main() -> None:
 
     clients = []
     for idx, loader in enumerate(loaders):
-        if args.model == "mlp":
-            model = MLPClassifier(
-                input_shape=input_shape,
-                hidden_dim=args.hidden_dim,
-                num_classes=num_classes,
-            )
-        elif args.model == "simplecnn":
-            model = SimpleCNN(
-                input_shape=input_shape,
-                num_classes=num_classes,
-            )
-        elif args.model == "VGG11":
-            model = VGG11(
-                input_channels=3,
-                num_classes=num_classes,
-            )
-        elif args.model == "ResNet18":
-            model = ResNet18(
-                input_channels=3,
-                num_classes=num_classes,
-            )
-        elif args.model == "ResNet20":
-            model = ResNet20(
-                input_channels=3,
-                num_classes=num_classes,
-            )
-        elif args.model == "ResNet32":
-            model = ResNet32(
-                input_channels=3,
-                num_classes=num_classes,
-            )
+        model = build_model_from_args(args, input_shape=input_shape, num_classes=num_classes)
         if args.optimizer == "adam":
             optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
         elif args.optimizer == "sgd":
@@ -134,10 +102,7 @@ def main() -> None:
         trainer = BaseTrainer(model=model, optimizer=optimizer, device=device)
         # Always maintain a student in FedKEMF. Distillation config controls
         # whether client-side distillation is enabled.
-        student = ResNet18(
-            input_channels=3,
-            num_classes=num_classes,
-        )
+        student = build_model_from_args(args, input_shape=input_shape, num_classes=num_classes)
 
         distill_cfg = None
         if args.distill:
@@ -159,10 +124,7 @@ def main() -> None:
         )
 
     # Server exchanges student parameters in FedKEMF.
-    server_model = ResNet18(
-        input_channels=3,
-        num_classes=num_classes,
-    )
+    server_model = build_model_from_args(args, input_shape=input_shape, num_classes=num_classes)
 
     aggregator = FedKEMServerAggregator(
         model=server_model,

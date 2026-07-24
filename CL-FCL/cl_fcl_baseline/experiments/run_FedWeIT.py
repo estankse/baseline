@@ -19,8 +19,7 @@ from cl_fcl_baseline.datasets.build import (
     partition_dataset_iid,
     partition_dataset_noniid,
 )
-from cl_fcl_baseline.models import ResNet18, ResNet20, ResNet32, VGG11
-from cl_fcl_baseline.models.simple_model import MLPClassifier, SimpleCNN
+from cl_fcl_baseline.models import build_model_from_args
 from cl_fcl_baseline.trainers.trainer import BaseTrainer
 from cl_fcl_baseline.trainers.utils import set_seed
 
@@ -31,20 +30,7 @@ except ImportError:  # pragma: no cover
 
 
 def _build_model(args: argparse.Namespace, input_shape: tuple[int, int, int], num_classes: int) -> torch.nn.Module:
-    input_channels = int(input_shape[0])
-    if args.model == "mlp":
-        return MLPClassifier(input_shape=input_shape, hidden_dim=args.hidden_dim, num_classes=num_classes)
-    if args.model == "simplecnn":
-        return SimpleCNN(input_shape=input_shape, num_classes=num_classes)
-    if args.model == "VGG11":
-        return VGG11(input_channels=input_channels, num_classes=num_classes)
-    if args.model == "ResNet18":
-        return ResNet18(input_channels=input_channels, num_classes=num_classes)
-    if args.model == "ResNet20":
-        return ResNet20(input_channels=input_channels, num_classes=num_classes)
-    if args.model == "ResNet32":
-        return ResNet32(input_channels=input_channels, num_classes=num_classes)
-    raise ValueError(f"Unsupported model: {args.model}")
+    return build_model_from_args(args, input_shape=input_shape, num_classes=num_classes)
 
 
 def _build_optimizer(args: argparse.Namespace, model: torch.nn.Module) -> torch.optim.Optimizer:

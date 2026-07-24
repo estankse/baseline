@@ -10,11 +10,11 @@ if __package__ in {None, ""}:
 
 import torch
 
-from cl_fcl_baseline.algorithms.PGD import evaluate_pgd_robustness
-from cl_fcl_baseline.algorithms.Sylva import FedWeITSylvaClient, FedWeITSylvaServer
+from cl_fcl_baseline.algorithms.robust.PGD import evaluate_pgd_robustness
+from cl_fcl_baseline.algorithms.robust.Sylva import FedWeITSylvaClient, FedWeITSylvaServer
 from cl_fcl_baseline.algorithms.fcl import FCLExperiment, NaiveContinualStrategy
 from cl_fcl_baseline.experiments.args import _parse_fedweit_sylva_args
-from cl_fcl_baseline.experiments.fcl_robust import (
+from cl_fcl_baseline.experiments.FCL_robust.fcl_robust import (
     EXPERIMENTS_LOG_DIR,
     build_model as _build_model,
     build_optimizer as _build_optimizer,

@@ -15,8 +15,7 @@ from cl_fcl_baseline.datasets.build import (
     partition_dataset_iid,
     partition_dataset_noniid,
 )
-from cl_fcl_baseline.models import ResNet18, ResNet20, ResNet32, VGG11
-from cl_fcl_baseline.models.simple_model import MLPClassifier, SimpleCNN
+from cl_fcl_baseline.models import build_model
 from cl_fcl_baseline.trainers.server import FederatedExperiment, FederatedServer
 from cl_fcl_baseline.trainers.trainer import BaseTrainer
 from cl_fcl_baseline.trainers.utils import set_seed
@@ -28,19 +27,12 @@ except ImportError:  # pragma: no cover
 
 
 def _build_model(model_name: str, input_shape: tuple[int, ...], hidden_dim: int, num_classes: int):
-    if model_name == "mlp":
-        return MLPClassifier(input_shape=input_shape, hidden_dim=hidden_dim, num_classes=num_classes)
-    if model_name == "simplecnn":
-        return SimpleCNN(input_shape=input_shape, num_classes=num_classes)
-    if model_name == "VGG11":
-        return VGG11(input_channels=3, num_classes=num_classes)
-    if model_name == "ResNet18":
-        return ResNet18(input_channels=3, num_classes=num_classes)
-    if model_name == "ResNet20":
-        return ResNet20(input_channels=3, num_classes=num_classes)
-    if model_name == "ResNet32":
-        return ResNet32(input_channels=3, num_classes=num_classes)
-    raise ValueError(f"Unsupported model: {model_name}")
+    return build_model(
+        model_name=model_name,
+        input_shape=input_shape,
+        num_classes=num_classes,
+        hidden_dim=hidden_dim,
+    )
 
 
 def _build_optimizer(name: str, model: torch.nn.Module, lr: float):

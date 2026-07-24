@@ -1,41 +1,39 @@
 from __future__ import annotations
 
 import json
+import sys
 from datetime import datetime
 from pathlib import Path
 
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+
 import torch
 
+from cl_fcl_baseline.algorithms.robust.FAT import FATClient
+from cl_fcl_baseline.algorithms.robust.PGD import evaluate_pgd_robustness
 from cl_fcl_baseline.algorithms.fl import FedAvgAggregator
 from cl_fcl_baseline.datasets import build_torchvision_dataset, dataset_info
 from cl_fcl_baseline.datasets.build import (
-    RandomClassificationDataset,
     build_dataloader,
     partition_dataset_dirichlet,
     partition_dataset_iid,
     partition_dataset_noniid,
 )
-from cl_fcl_baseline.models import build_model_from_args
-from cl_fcl_baseline.trainers.client import FederatedClient
+from cl_fcl_baseline.experiments.args import parse_fat_args
+from cl_fcl_baseline.experiments.FCL_robust.fcl_robust import build_model, build_optimizer, build_pgd_config
 from cl_fcl_baseline.trainers.server import FederatedExperiment, FederatedServer
 from cl_fcl_baseline.trainers.trainer import BaseTrainer
 from cl_fcl_baseline.trainers.utils import set_seed
 
-try:
-    from .args import parse_fedavg_args
-except ImportError:  # pragma: no cover
-    from cl_fcl_baseline.experiments.args import parse_fedavg_args
-
 
 def main() -> None:
-    global netmodel
-    args = parse_fedavg_args()
+    args = parse_fat_args()
     set_seed(args.seed)
     if args.device == "auto":
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     else:
         device = torch.device(args.device)
-
 
     input_shape, num_classes = dataset_info(args.dataset)
     dataset = build_torchvision_dataset(
@@ -72,27 +70,26 @@ def main() -> None:
     loaders = [build_dataloader(part, batch_size=args.batch_size, shuffle=True) for part in partitions]
     test_loader = build_dataloader(test_dataset, batch_size=args.batch_size, shuffle=False)
 
-
-
+    pgd_config = build_pgd_config(args)
     clients = []
     for idx, loader in enumerate(loaders):
-        model = build_model_from_args(args, input_shape=input_shape, num_classes=num_classes)
-        if args.optimizer == "adam":
-            optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-        elif args.optimizer == "sgd":
-            optimizer = torch.optim.SGD(model.parameters(), lr=args.lr,momentum=0.9)
+        model = build_model(args, input_shape=input_shape, num_classes=num_classes)
+        optimizer = build_optimizer(args, model)
         trainer = BaseTrainer(model=model, optimizer=optimizer, device=device)
         clients.append(
-            FederatedClient(
+            FATClient(
                 client_id=f"client_{idx}",
                 trainer=trainer,
                 train_loader=loader,
                 epochs=args.local_epochs,
+                pgd_config=pgd_config,
+                adversarial_ratio=args.fat_adversarial_ratio,
+                warmup_rounds=args.fat_warmup_rounds,
+                warmup_adversarial_ratio=args.fat_warmup_adversarial_ratio,
             )
         )
 
-    server_model = build_model_from_args(args, input_shape=input_shape, num_classes=num_classes)
-
+    server_model = build_model(args, input_shape=input_shape, num_classes=num_classes)
     server = FederatedServer(
         model=server_model,
         clients=clients,
@@ -100,28 +97,60 @@ def main() -> None:
         client_sample_ratio=args.client_sample_ratio,
     )
 
-    if args.optimizer == "adam":
-        eval_optimizer = torch.optim.Adam(server.model.parameters(), lr=args.lr)
-    elif args.optimizer == "sgd":
-        eval_optimizer = torch.optim.SGD(server.model.parameters(), lr=args.lr,momentum=0.9)
-    eval_trainer = BaseTrainer(
-        model=server.model,
-        optimizer=eval_optimizer,
-        device=device,
-    )
+    eval_optimizer = build_optimizer(args, server.model)
+    eval_trainer = BaseTrainer(model=server.model, optimizer=eval_optimizer, device=device)
     log_path = args.log_file.strip()
     if not log_path:
         log_dir = Path("logs")
         log_dir.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        log_path = str(log_dir / f"fedavg_{timestamp}.jsonl")
+        log_path = str(log_dir / f"fat_{timestamp}.jsonl")
+    else:
+        Path(log_path).parent.mkdir(parents=True, exist_ok=True)
+
+    pgd_max_batches = None if int(args.pgd_max_batches) <= 0 else int(args.pgd_max_batches)
 
     def _eval_round(round_idx: int) -> None:
         test_metrics = eval_trainer.evaluate(test_loader)
-        print(f"[eval] round {round_idx}: acc={test_metrics.get('accuracy', 0.0):.4f}")
-        record = {"type": "eval", "round": round_idx, "metrics": test_metrics}
+        robust_metrics = evaluate_pgd_robustness(
+            server.model,
+            test_loader,
+            pgd_config,
+            device=device,
+            max_batches=pgd_max_batches,
+        )
+        print(
+            f"[eval] round {round_idx}: "
+            f"acc={test_metrics.get('accuracy', 0.0):.4f} robust_acc={robust_metrics.get('accuracy', 0.0):.4f}"
+        )
+        record = {
+            "type": "eval",
+            "round": round_idx,
+            "metrics": {
+                "accuracy": float(test_metrics.get("accuracy", 0.0)),
+                "loss": float(test_metrics.get("loss", 0.0)),
+                "robust_accuracy": float(robust_metrics.get("accuracy", 0.0)),
+                "robust_loss": float(robust_metrics.get("loss", 0.0)),
+                "num_pgd_batches": float(robust_metrics.get("num_batches", 0.0)),
+                "num_pgd_samples": float(robust_metrics.get("num_samples", 0.0)),
+            },
+            "pgd": {
+                "epsilon": args.pgd_epsilon,
+                "step_size": args.pgd_step_size,
+                "steps": args.pgd_steps,
+                "random_start": args.pgd_random_start,
+                "normalized_space": args.pgd_normalized_space,
+                "max_batches": args.pgd_max_batches,
+            },
+            "fat": {
+                "adversarial_ratio": args.fat_adversarial_ratio,
+                "warmup_rounds": args.fat_warmup_rounds,
+                "warmup_adversarial_ratio": args.fat_warmup_adversarial_ratio,
+            },
+        }
         with open(log_path, "a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+
     experiment = FederatedExperiment(
         server=server,
         num_rounds=args.num_rounds,
@@ -132,8 +161,8 @@ def main() -> None:
         log_path=log_path,
     )
 
-    history = experiment.run()
-    print("FedAvg finished.")
+    experiment.run()
+    print("FAT finished.")
 
 
 if __name__ == "__main__":

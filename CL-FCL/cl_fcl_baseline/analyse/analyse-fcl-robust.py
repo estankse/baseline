@@ -154,7 +154,7 @@ def plot_global_avg_metric(series, xticks, xtick_labels, title, ylabel, save_pat
     plt.close()
 
 
-def plots_fcl_robust(log_text, output_dir="plot-FCL-robust"):
+def plots_fcl_robust(log_text, output_dir="plot-FCL-FL_robust"):
     ensure_dir(output_dir)
 
     train_dir = os.path.join(output_dir, "train")

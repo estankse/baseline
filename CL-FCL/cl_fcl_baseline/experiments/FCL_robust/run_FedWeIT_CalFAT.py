@@ -10,7 +10,7 @@ if __package__ in {None, ""}:
 
 import torch
 
-from cl_fcl_baseline.algorithms.CalFAT import (
+from cl_fcl_baseline.algorithms.robust.CalFAT import (
     FedWeITCalFATClient,
     FedWeITCalFATServer,
     evaluate_calfat_model,
@@ -18,7 +18,7 @@ from cl_fcl_baseline.algorithms.CalFAT import (
 )
 from cl_fcl_baseline.algorithms.fcl import FCLExperiment, NaiveContinualStrategy
 from cl_fcl_baseline.experiments.args import _parse_fedweit_calfat_args
-from cl_fcl_baseline.experiments.fcl_robust import (
+from cl_fcl_baseline.experiments.FCL_robust.fcl_robust import (
     EXPERIMENTS_LOG_DIR,
     build_model as _build_model,
     build_optimizer as _build_optimizer,

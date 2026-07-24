@@ -11,8 +11,8 @@ if __package__ in {None, ""}:
 
 import torch
 
-from cl_fcl_baseline.algorithms.PGD import evaluate_pgd_robustness
-from cl_fcl_baseline.algorithms.RBN import (
+from cl_fcl_baseline.algorithms.robust.PGD import evaluate_pgd_robustness
+from cl_fcl_baseline.algorithms.robust.RBN import (
     FedWeITRBNClient,
     FedWeITRBNServer,
     enable_dual_batch_norm,
@@ -20,7 +20,7 @@ from cl_fcl_baseline.algorithms.RBN import (
 )
 from cl_fcl_baseline.algorithms.fcl import FCLExperiment, NaiveContinualStrategy
 from cl_fcl_baseline.experiments.args import _parse_fedweit_rbn_args
-from cl_fcl_baseline.experiments.fcl_robust import (
+from cl_fcl_baseline.experiments.FCL_robust.fcl_robust import (
     EXPERIMENTS_LOG_DIR,
     build_model as _build_model,
     build_optimizer as _build_optimizer,

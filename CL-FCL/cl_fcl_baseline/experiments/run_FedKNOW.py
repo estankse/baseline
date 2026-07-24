@@ -2,19 +2,14 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from datetime import datetime
 from pathlib import Path
-
-if __package__ in {None, ""}:
-    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 import torch
 from torch.utils.data import Dataset
 
-from cl_fcl_baseline.algorithms.robust.PGD import PGDConfig, evaluate_pgd_robustness
 from cl_fcl_baseline.algorithms.fcl import FCLExperiment, NaiveContinualStrategy
-from cl_fcl_baseline.algorithms.robust.own import FedWeITOwnClient, FedWeITOwnServer
+from cl_fcl_baseline.algorithms.fedknow import FedKNOWClient, FedKNOWServer
 from cl_fcl_baseline.contracts import TaskDefinition
 from cl_fcl_baseline.datasets import build_class_incremental_tasks, build_torchvision_dataset, dataset_info
 from cl_fcl_baseline.datasets.build import (
@@ -25,70 +20,13 @@ from cl_fcl_baseline.datasets.build import (
     partition_dataset_noniid,
 )
 from cl_fcl_baseline.models import build_model_from_args
-from cl_fcl_baseline.experiments.FCL_robust.fcl_robust import EXPERIMENTS_LOG_DIR
 from cl_fcl_baseline.trainers.trainer import BaseTrainer
-from cl_fcl_baseline.trainers.utils import set_seed
+from cl_fcl_baseline.trainers.utils import move_to_device, set_seed
 
 try:
-    from .args import _parse_fedweit_own_args
+    from .args import parse_fedknow_args
 except ImportError:  # pragma: no cover
-    from cl_fcl_baseline.experiments.args import _parse_fedweit_own_args
-
-
-_NORMALIZATION = {
-    "mnist": ((0.1307,), (0.3081,)),
-    "cifar10": ((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-    "cifar100": ((0.5071, 0.4867, 0.4408), (0.2675, 0.2565, 0.2761)),
-}
-
-
-
-
-def _build_pgd_config(args: argparse.Namespace) -> PGDConfig:
-    key = str(args.dataset).lower()
-    if key not in _NORMALIZATION:
-        return PGDConfig(
-            epsilon=float(args.pgd_epsilon),
-            step_size=float(args.pgd_step_size),
-            steps=int(args.pgd_steps),
-            random_start=bool(args.pgd_random_start),
-        )
-
-    mean, std = _NORMALIZATION[key]
-    clip_min = [(0.0 - channel_mean) / channel_std for channel_mean, channel_std in zip(mean, std)]
-    clip_max = [(1.0 - channel_mean) / channel_std for channel_mean, channel_std in zip(mean, std)]
-    if bool(args.pgd_normalized_space):
-        epsilon: float | list[float] = float(args.pgd_epsilon)
-        step_size: float | list[float] = float(args.pgd_step_size)
-    else:
-        epsilon = [float(args.pgd_epsilon) / channel_std for channel_std in std]
-        step_size = [float(args.pgd_step_size) / channel_std for channel_std in std]
-
-    return PGDConfig(
-        epsilon=epsilon,
-        step_size=step_size,
-        steps=int(args.pgd_steps),
-        random_start=bool(args.pgd_random_start),
-        clip_min=clip_min,
-        clip_max=clip_max,
-    )
-
-
-def _build_own_uap_settings(
-    args: argparse.Namespace,
-) -> tuple[float | list[float], list[float] | None, list[float] | None]:
-    key = str(args.dataset).lower()
-    if key not in _NORMALIZATION:
-        return float(args.own_uap_epsilon), None, None
-
-    mean, std = _NORMALIZATION[key]
-    clip_min = [(0.0 - channel_mean) / channel_std for channel_mean, channel_std in zip(mean, std)]
-    clip_max = [(1.0 - channel_mean) / channel_std for channel_mean, channel_std in zip(mean, std)]
-    if bool(args.own_uap_normalized_space):
-        epsilon: float | list[float] = float(args.own_uap_epsilon)
-    else:
-        epsilon = [float(args.own_uap_epsilon) / channel_std for channel_std in std]
-    return epsilon, clip_min, clip_max
+    from cl_fcl_baseline.experiments.args import parse_fedknow_args
 
 
 def _build_model(args: argparse.Namespace, input_shape: tuple[int, int, int], num_classes: int) -> torch.nn.Module:
@@ -156,7 +94,7 @@ def _build_task_stream(
         num_tasks=num_tasks,
         seed=args.seed,
         shuffle_classes=args.task_order_shuffle,
-        remap_labels=True,
+        remap_labels=False,
     )
     test_task_datasets = build_class_incremental_tasks(
         test_dataset,
@@ -164,7 +102,7 @@ def _build_task_stream(
         num_tasks=num_tasks,
         seed=args.seed,
         shuffle_classes=args.task_order_shuffle,
-        remap_labels=True,
+        remap_labels=False,
     )
 
     tasks: list[TaskDefinition] = []
@@ -176,17 +114,17 @@ def _build_task_stream(
             TaskDefinition(
                 task_id=task_id,
                 name=task_id,
-                num_classes=classes_per_task,
+                num_classes=total_num_classes,
                 metadata={"classes": list(train_split.class_ids)},
             )
         )
         train_datasets[task_id] = train_split
         test_datasets[task_id] = test_split
-    return tasks, train_datasets, test_datasets, input_shape, classes_per_task
+    return tasks, train_datasets, test_datasets, input_shape, total_num_classes
 
 
 def main() -> None:
-    args = _parse_fedweit_own_args()
+    args = parse_fedknow_args()
     set_seed(args.seed)
     if args.device == "auto":
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -194,8 +132,6 @@ def main() -> None:
         device = torch.device(args.device)
 
     tasks, train_datasets, test_datasets, input_shape, task_num_classes = _build_task_stream(args)
-    pgd_config = _build_pgd_config(args)
-    own_uap_epsilon, own_uap_clip_min, own_uap_clip_max = _build_own_uap_settings(args)
 
     client_task_loaders = [dict() for _ in range(args.num_clients)]
     for task in tasks:
@@ -228,6 +164,10 @@ def main() -> None:
         task_id: build_dataloader(dataset, batch_size=args.batch_size, shuffle=False)
         for task_id, dataset in test_datasets.items()
     }
+    task_classes = {
+        task.task_id: list(task.metadata.get("classes", range(task.num_classes)))
+        for task in tasks
+    }
 
     clients = []
     for idx in range(args.num_clients):
@@ -235,42 +175,33 @@ def main() -> None:
         optimizer = _build_optimizer(args, model)
         trainer = BaseTrainer(model=model, optimizer=optimizer, device=device)
         clients.append(
-            FedWeITOwnClient(
+            FedKNOWClient(
                 client_id=f"client_{idx}",
                 trainer=trainer,
                 task_loaders=client_task_loaders[idx],
                 epochs=args.local_epochs,
-                lambda1=args.lambda1,
-                lambda2=args.lambda2,
-                lambda_mask=args.lambda_mask,
-                mask_init=args.mask_init,
-                mask_threshold=args.mask_threshold,
-                adaptive_threshold=None if args.adaptive_threshold < 0 else args.adaptive_threshold,
-                client_sparsity=args.client_sparsity,
+                knowledge_ratio=args.knowledge_ratio,
+                signature_k=args.signature_k,
+                integrator_steps=args.integrator_steps,
+                knowledge_finetune_epochs=args.knowledge_finetune_epochs,
+                post_aggregation_epochs=args.post_aggregation_epochs,
+                distillation_warmup_epochs=args.distillation_warmup_epochs,
+                restorer_loss=args.restorer_loss,
+                restorer_temperature=args.restorer_temperature,
                 optimizer_name=args.optimizer,
                 lr=args.lr,
                 weight_decay=5e-4 if args.optimizer == "sgd" else 0.0,
-                uap_epsilon=own_uap_epsilon,
-                uap_lr=args.own_uap_lr,
-                uap_gen_epochs=args.own_uap_gen_epochs,
-                uap_data_ratio=args.own_uap_data_ratio,
-                uap_clip_min=own_uap_clip_min,
-                uap_clip_max=own_uap_clip_max,
-                adv_epochs=args.own_adv_epochs,
-                stage1_epochs=args.own_stage1_epochs,
-                adv_mix_ratio=args.own_adv_mix_ratio,
-                conf_threshold=args.own_conf_threshold,
-                defense_lr_scale=args.own_defense_lr_scale,
+                task_classes=task_classes,
             )
         )
 
     server_model = _build_model(args, input_shape=input_shape, num_classes=task_num_classes)
-    server = FedWeITOwnServer(
+    if clients:
+        server_model.load_state_dict(clients[0].trainer.model.state_dict(), strict=True)
+    server = FedKNOWServer(
         model=server_model,
         clients=clients,
         client_sample_ratio=args.client_sample_ratio,
-        kb_sample_size=args.kb_sample_size,
-        uap_topk=args.own_k_uap,
     )
 
     eval_model = _build_model(args, input_shape=input_shape, num_classes=task_num_classes)
@@ -279,110 +210,101 @@ def main() -> None:
 
     log_path = args.log_file.strip()
     if not log_path:
-        log_dir = EXPERIMENTS_LOG_DIR
+        log_dir = Path("logs")
         log_dir.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        log_path = str(log_dir / f"fedweit_own_{timestamp}.jsonl")
+        log_path = str(log_dir / f"fedknow_{timestamp}.jsonl")
     else:
         Path(log_path).parent.mkdir(parents=True, exist_ok=True)
 
     task_order = [task.task_id for task in tasks]
-    pgd_max_batches = None if int(args.pgd_max_batches) <= 0 else int(args.pgd_max_batches)
+
+    def _evaluate_task(task_id: str) -> dict[str, float]:
+        task_loader = test_loaders[task_id]
+        class_ids = task_classes.get(task_id, [])
+        class_tensor = None
+        if class_ids and len(class_ids) < task_num_classes:
+            class_tensor = torch.tensor([int(class_id) for class_id in class_ids], device=device, dtype=torch.long)
+        eval_trainer.model.to(device)
+        eval_trainer.model.eval()
+        total_loss = 0.0
+        total_correct = 0
+        total_examples = 0
+        with torch.no_grad():
+            for inputs, targets in task_loader:
+                inputs = move_to_device(inputs, device)
+                targets = move_to_device(targets, device)
+                logits = eval_trainer.model(inputs)
+                if class_tensor is None:
+                    loss = torch.nn.functional.cross_entropy(logits, targets)
+                    predictions = logits.argmax(dim=1)
+                else:
+                    task_logits = logits.index_select(dim=1, index=class_tensor)
+                    local_targets = torch.zeros_like(targets)
+                    for local_idx, class_id in enumerate(class_tensor.tolist()):
+                        local_targets = torch.where(
+                            targets == int(class_id),
+                            torch.full_like(targets, local_idx),
+                            local_targets,
+                        )
+                    loss = torch.nn.functional.cross_entropy(task_logits, local_targets)
+                    predictions = class_tensor[task_logits.argmax(dim=1)]
+                batch_size = int(targets.shape[0])
+                total_examples += batch_size
+                total_loss += float(loss.detach().item()) * batch_size
+                total_correct += int((predictions == targets).sum().item())
+        if total_examples == 0:
+            return {"loss": 0.0, "accuracy": 0.0}
+        return {
+            "loss": total_loss / total_examples,
+            "accuracy": total_correct / total_examples,
+        }
 
     def _eval_round(task_id: str, round_idx: int) -> None:
         seen_task_ids = task_order[: task_order.index(task_id) + 1]
         task_metrics: dict[str, dict[str, float]] = {}
         avg_accuracy = 0.0
         avg_loss = 0.0
-        avg_robust_accuracy = 0.0
-        avg_robust_loss = 0.0
         for seen_task_id in seen_task_ids:
             task_loader = test_loaders[seen_task_id]
             evaluated_clients = 0
             client_accuracy = 0.0
             client_loss = 0.0
-            client_robust_accuracy = 0.0
-            client_robust_loss = 0.0
-            client_robust_batches = 0.0
-            client_robust_samples = 0.0
-            for client_idx, client in enumerate(server.clients):
-                if seen_task_id not in client.mask_logits:
+            for client in server.clients:
+                if client.current_state is None and client.personal_state is None:
                     continue
                 eval_state = server.build_eval_state(seen_task_id, client_id=client.client_id)
                 eval_trainer.model.load_state_dict(eval_state, strict=True)
-                local_metrics = eval_trainer.evaluate(task_loader)
-                robust_metrics = evaluate_pgd_robustness(
-                    eval_trainer.model,
-                    task_loader,
-                    pgd_config,
-                    device=eval_trainer.device,
-                    max_batches=pgd_max_batches,
-                )
+                local_metrics = _evaluate_task(seen_task_id)
                 evaluated_clients += 1
                 client_accuracy += float(local_metrics.get("accuracy", 0.0))
                 client_loss += float(local_metrics.get("loss", 0.0))
-                client_robust_accuracy += float(robust_metrics.get("accuracy", 0.0))
-                client_robust_loss += float(robust_metrics.get("loss", 0.0))
-                client_robust_batches += float(robust_metrics.get("num_batches", 0.0))
-                client_robust_samples += float(robust_metrics.get("num_samples", 0.0))
             metrics = {
                 "accuracy": client_accuracy / max(1, evaluated_clients),
                 "loss": client_loss / max(1, evaluated_clients),
-                "robust_accuracy": client_robust_accuracy / max(1, evaluated_clients),
-                "robust_loss": client_robust_loss / max(1, evaluated_clients),
                 "num_eval_clients": float(evaluated_clients),
                 "num_eval_samples": float(len(task_loader.dataset)),
-                "num_pgd_batches": client_robust_batches / max(1, evaluated_clients),
-                "num_pgd_samples": client_robust_samples / max(1, evaluated_clients),
             }
             task_metrics[seen_task_id] = metrics
             avg_accuracy += float(metrics.get("accuracy", 0.0))
             avg_loss += float(metrics.get("loss", 0.0))
-            avg_robust_accuracy += float(metrics.get("robust_accuracy", 0.0))
-            avg_robust_loss += float(metrics.get("robust_loss", 0.0))
         avg_accuracy /= max(1, len(seen_task_ids))
         avg_loss /= max(1, len(seen_task_ids))
-        avg_robust_accuracy /= max(1, len(seen_task_ids))
-        avg_robust_loss /= max(1, len(seen_task_ids))
         per_task_accuracy = " ".join(
-            f"{seen_task_id}={metrics.get('accuracy', 0.0):.4f}/robust={metrics.get('robust_accuracy', 0.0):.4f}"
+            f"{seen_task_id}={metrics.get('accuracy', 0.0):.4f}"
             for seen_task_id, metrics in task_metrics.items()
         )
-        print(
-            f"[eval] task={task_id} round={round_idx}: "
-            f"avg_acc={avg_accuracy:.4f} avg_robust_acc={avg_robust_accuracy:.4f} {per_task_accuracy}"
-        )
+        print(f"[eval] task={task_id} round={round_idx}: avg_acc={avg_accuracy:.4f} {per_task_accuracy}")
         record = {
             "type": "eval",
             "task_id": task_id,
             "round": round_idx,
-            "avg_metrics": {
-                "accuracy": avg_accuracy,
-                "loss": avg_loss,
-                "robust_accuracy": avg_robust_accuracy,
-                "robust_loss": avg_robust_loss,
-            },
+            "avg_metrics": {"accuracy": avg_accuracy, "loss": avg_loss},
             "task_metrics": task_metrics,
-            "pgd": {
-                "epsilon": args.pgd_epsilon,
-                "step_size": args.pgd_step_size,
-                "steps": args.pgd_steps,
-                "random_start": args.pgd_random_start,
-                "normalized_space": args.pgd_normalized_space,
-                "max_batches": args.pgd_max_batches,
-            },
-            "own": {
-                "uap_epsilon": args.own_uap_epsilon,
-                "uap_lr": args.own_uap_lr,
-                "uap_gen_epochs": args.own_uap_gen_epochs,
-                "uap_data_ratio": args.own_uap_data_ratio,
-                "uap_normalized_space": args.own_uap_normalized_space,
-                "adv_epochs": args.own_adv_epochs,
-                "stage1_epochs": args.own_stage1_epochs,
-                "adv_mix_ratio": args.own_adv_mix_ratio,
-                "conf_threshold": args.own_conf_threshold,
-                "defense_lr_scale": args.own_defense_lr_scale,
-                "k_uap": args.own_k_uap,
+            "eval_mode": "task_aware",
+            "task_classes": {
+                seen_task_id: list(task_classes.get(seen_task_id, []))
+                for seen_task_id in seen_task_ids
             },
         }
         with open(log_path, "a", encoding="utf-8") as handle:
@@ -400,9 +322,8 @@ def main() -> None:
     )
 
     experiment.run()
-    print("FedWeIT-own finished.")
+    print("FedKNOW finished.")
 
 
 if __name__ == "__main__":
     main()
-

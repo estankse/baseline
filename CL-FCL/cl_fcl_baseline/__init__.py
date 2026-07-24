@@ -1,4 +1,18 @@
-from .algorithms import ContinualClient, FCLExperiment, FCLServer, FedAvgAggregator, NaiveContinualStrategy
+from .algorithms import (
+    ContinualClient,
+    EWCLearner,
+    FCLExperiment,
+    FCLServer,
+    FedAvgAggregator,
+    GEMLearner,
+    ICaRLLearner,
+    LwFLearner,
+    NaiveContinualStrategy,
+    AFLCRAERLearner,
+    DAMLLearner,
+    FLAIRLearner,
+    TABALearner,
+)
 from .datasets import RandomClassificationDataset, build_dataloader, partition_dataset_iid, partition_dataset_noniid
 from .models import MLPClassifier, SimpleCNN
 from .trainers import BaseTrainer, FederatedClient, FederatedExperiment, FederatedServer, build_default_loss
@@ -13,6 +27,14 @@ __all__ = [
     "FCLExperiment",
     "ContinualClient",
     "NaiveContinualStrategy",
+    "EWCLearner",
+    "GEMLearner",
+    "LwFLearner",
+    "ICaRLLearner",
+    "TABALearner",
+    "DAMLLearner",
+    "FLAIRLearner",
+    "AFLCRAERLearner",
     "RandomClassificationDataset",
     "build_dataloader",
     "partition_dataset_iid",
