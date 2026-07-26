@@ -1,0 +1,18 @@
+{
+  "log_file": "E:\\cc\\Keras\\github\\CL-FCL\\cl_fcl_baseline\\experiments\\CL\\logs\\cl_gem_20260717_124443.jsonl",
+  "method": "gem",
+  "num_train_records": 200,
+  "num_eval_records": 200,
+  "num_completed_tasks": 10,
+  "final_eval": {
+    "average_accuracy": 0.6173,
+    "average_forgetting": 0.17200000000000001,
+    "backward_transfer": -0.17200000000000001
+  },
+  "best_eval": {
+    "average_accuracy": 0.689,
+    "average_forgetting": 0.0,
+    "backward_transfer": 0.0
+  },
+  "config": {}
+}

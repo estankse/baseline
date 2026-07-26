@@ -51,11 +51,14 @@ def _build_optimizer(
 
 def _build_pgd_config(args: argparse.Namespace, *, evaluation: bool) -> PGDConfig:
     steps = int(args.eval_pgd_steps if evaluation else args.pgd_steps)
+    raw_step_size = float(
+        args.eval_pgd_step_size if evaluation else args.pgd_step_size
+    )
     key = str(args.dataset).lower()
     if key not in NORMALIZATION_STATS:
         return PGDConfig(
             epsilon=float(args.pgd_epsilon),
-            step_size=float(args.pgd_step_size),
+            step_size=raw_step_size,
             steps=steps,
             random_start=bool(args.pgd_random_start),
         )
@@ -64,10 +67,10 @@ def _build_pgd_config(args: argparse.Namespace, *, evaluation: bool) -> PGDConfi
     clip_max = [(1.0 - value) / scale for value, scale in zip(mean, std)]
     if args.pgd_normalized_space:
         epsilon: float | list[float] = float(args.pgd_epsilon)
-        step_size: float | list[float] = float(args.pgd_step_size)
+        step_size: float | list[float] = raw_step_size
     else:
         epsilon = [float(args.pgd_epsilon) / scale for scale in std]
-        step_size = [float(args.pgd_step_size) / scale for scale in std]
+        step_size = [raw_step_size / scale for scale in std]
     return PGDConfig(
         epsilon=epsilon,
         step_size=step_size,

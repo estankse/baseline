@@ -342,8 +342,17 @@ def _add_cl_robust_attack_args(
     parser.add_argument(
         "--eval-pgd-steps",
         type=int,
-        default=20,
+        default=10,
         help="number of PGD steps used for robust continual-learning evaluation",
+    )
+    parser.add_argument(
+        "--eval-pgd-step-size",
+        type=float,
+        default=2.0 / 255.0,
+        help=(
+            "PGD step size used only for evaluation; keeping this independent "
+            "from the method-specific training attack makes robust results comparable"
+        ),
     )
 
 
@@ -373,9 +382,8 @@ def build_taba_parser() -> argparse.ArgumentParser:
     parser.add_argument("--taba-mix-batch-size", type=int, default=0, help="m'; 0 matches stream batch size")
     parser.add_argument("--taba-lambda-min", type=float, default=0.45)
     parser.add_argument("--taba-lambda-max", type=float, default=0.55)
-    _add_cl_robust_attack_args(parser, train_steps=7)
-    # Section 4.1 uses the same seven-step PGD parameters for evaluation.
-    parser.set_defaults(eval_pgd_steps=7)
+    _add_cl_robust_attack_args(parser, train_steps=10)
+    parser.set_defaults(eval_pgd_steps=10, eval_pgd_step_size=2.0 / 255.0)
     return parser
 
 
@@ -390,18 +398,18 @@ def build_daml_parser() -> argparse.ArgumentParser:
         weight_decay=0.0,
         scenario="class",
     )
-    # parser.set_defaults(
-    #     dataset="cifar10",
-    #     classes_per_task=2,
-    #     num_tasks=5,
-    #     optimizer="adam",
-    #     eval_every=0,
-    # )
+    # Mukai et al. optimize DAML with Adam.  Falling back to the common CL
+    # SGD default is especially harmful here because unified BCE averages
+    # over every active output (10 already in CIFAR-100 task 0), shrinking
+    # each classifier-row gradient before any continual-learning component
+    # is involved.
+    parser.set_defaults(optimizer="adam")
     parser.add_argument("--algorithm", type=str, default="daml", choices=["daml"])
     parser.add_argument("--memory-budget", type=int, default=2000)
     parser.add_argument("--replay-batch-size", type=int, default=0, help="0 matches stream batch size")
     parser.add_argument("--daml-alpha", type=float, default=0.2, help="additional memory CE weight")
-    _add_cl_robust_attack_args(parser, train_steps=10, step_size=0.01)
+    _add_cl_robust_attack_args(parser, train_steps=10)
+    parser.set_defaults(eval_pgd_steps=10, eval_pgd_step_size=2.0 / 255.0)
     return parser
 
 
@@ -432,6 +440,8 @@ def build_aflc_raer_parser() -> argparse.ArgumentParser:
         default_model="ResNet18",
         hidden_dim=200,
         batch_size=32,
+        # AFLC's training-only margin needs the ER+AT horizon used by Mi et
+        # al.; their CIFAR protocol trains every task for 50 epochs.
         epochs=30,
         lr=0.1,
         weight_decay=0.0,
@@ -439,7 +449,7 @@ def build_aflc_raer_parser() -> argparse.ArgumentParser:
     )
     # parser.set_defaults(dataset="cifar10", classes_per_task=2, num_tasks=5, eval_every=0)
     parser.add_argument("--algorithm", type=str, default="aflc_raer", choices=["aflc_raer"])
-    parser.add_argument("--memory-budget", type=int, default=200)
+    parser.add_argument("--memory-budget", type=int, default=2000)
     parser.add_argument("--replay-batch-size", type=int, default=0, help="0 matches stream batch size")
     parser.add_argument("--aflc-alpha", type=float, default=3.5)
     parser.add_argument("--raer-threshold", type=int, default=5)

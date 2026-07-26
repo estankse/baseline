@@ -1,0 +1,54 @@
+{
+  "log_file": "E:\\cc\\Keras\\github\\CL-FCL\\cl_fcl_baseline\\experiments\\CL\\logs\\cl_ewc_20260717_125354.jsonl",
+  "method": "ewc",
+  "num_train_records": 100,
+  "num_eval_records": 100,
+  "num_completed_tasks": 5,
+  "final_eval": {
+    "average_accuracy": 0.1,
+    "average_forgetting": 0.446,
+    "backward_transfer": -0.4415
+  },
+  "best_eval": {
+    "average_accuracy": 0.707,
+    "average_forgetting": 0.0,
+    "backward_transfer": 0.0
+  },
+  "config": {
+    "seed": 0,
+    "device": "auto",
+    "scenario": "task",
+    "dataset": "cifar100",
+    "data_dir": "data",
+    "num_samples": 0,
+    "num_classes": 100,
+    "input_shape": [
+      1,
+      28,
+      28
+    ],
+    "num_tasks": 0,
+    "classes_per_task": 10,
+    "task_order_shuffle": false,
+    "batch_size": 64,
+    "num_workers": 0,
+    "epochs": 20,
+    "model": "ResNet32",
+    "hidden_dim": 400,
+    "vit_patch_size": 4,
+    "vit_dropout": 0.0,
+    "vit_attention_dropout": 0.0,
+    "vit_mlp_ratio": 4.0,
+    "optimizer": "sgd",
+    "lr": 0.001,
+    "momentum": 0.9,
+    "weight_decay": 0.0,
+    "log_file": "",
+    "log_each_epoch": false,
+    "eval_every": 1,
+    "algorithm": "ewc",
+    "ewc_lambda": 400.0,
+    "fisher_samples": 200,
+    "fisher_mode": "sampled"
+  }
+}

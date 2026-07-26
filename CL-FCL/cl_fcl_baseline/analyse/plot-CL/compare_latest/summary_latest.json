@@ -1,0 +1,54 @@
+{
+  "ewc": {
+    "log_file": "E:\\cc\\Keras\\github\\CL-FCL\\cl_fcl_baseline\\experiments\\CL\\logs\\cl_ewc_20260717_125354.jsonl",
+    "final_eval": {
+      "average_accuracy": 0.1,
+      "average_forgetting": 0.446,
+      "backward_transfer": -0.4415
+    },
+    "best_eval": {
+      "average_accuracy": 0.707,
+      "average_forgetting": 0.0,
+      "backward_transfer": 0.0
+    }
+  },
+  "gem": {
+    "log_file": "E:\\cc\\Keras\\github\\CL-FCL\\cl_fcl_baseline\\experiments\\CL\\logs\\cl_gem_20260717_124443.jsonl",
+    "final_eval": {
+      "average_accuracy": 0.6173,
+      "average_forgetting": 0.17200000000000001,
+      "backward_transfer": -0.17200000000000001
+    },
+    "best_eval": {
+      "average_accuracy": 0.689,
+      "average_forgetting": 0.0,
+      "backward_transfer": 0.0
+    }
+  },
+  "icarl": {
+    "log_file": "E:\\cc\\Keras\\github\\CL-FCL\\cl_fcl_baseline\\experiments\\CL\\logs\\cl_icarl_20260718_131432.jsonl",
+    "final_eval": {
+      "average_accuracy": 0.44770000000000004,
+      "average_forgetting": 0.2018888888888889,
+      "backward_transfer": -0.2018888888888889
+    },
+    "best_eval": {
+      "average_accuracy": 0.766,
+      "average_forgetting": 0.0,
+      "backward_transfer": 0.0
+    }
+  },
+  "lwf": {
+    "log_file": "E:\\cc\\Keras\\github\\CL-FCL\\cl_fcl_baseline\\experiments\\CL\\logs\\cl_lwf_20260717_200855.jsonl",
+    "final_eval": {
+      "average_accuracy": 0.6342999999999999,
+      "average_forgetting": 0.14911111111111114,
+      "backward_transfer": -0.14911111111111114
+    },
+    "best_eval": {
+      "average_accuracy": 0.711,
+      "average_forgetting": 0.0,
+      "backward_transfer": 0.0
+    }
+  }
+}

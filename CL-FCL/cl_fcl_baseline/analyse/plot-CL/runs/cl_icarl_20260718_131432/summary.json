@@ -1,0 +1,54 @@
+{
+  "log_file": "E:\\cc\\Keras\\github\\CL-FCL\\cl_fcl_baseline\\experiments\\CL\\logs\\cl_icarl_20260718_131432.jsonl",
+  "method": "icarl",
+  "num_train_records": 300,
+  "num_eval_records": 300,
+  "num_completed_tasks": 10,
+  "final_eval": {
+    "average_accuracy": 0.44770000000000004,
+    "average_forgetting": 0.2018888888888889,
+    "backward_transfer": -0.2018888888888889
+  },
+  "best_eval": {
+    "average_accuracy": 0.766,
+    "average_forgetting": 0.0,
+    "backward_transfer": 0.0
+  },
+  "config": {
+    "seed": 0,
+    "device": "auto",
+    "scenario": "class",
+    "dataset": "cifar100",
+    "data_dir": "data",
+    "num_samples": 0,
+    "num_classes": 100,
+    "input_shape": [
+      1,
+      28,
+      28
+    ],
+    "num_tasks": 0,
+    "classes_per_task": 10,
+    "task_order_shuffle": true,
+    "batch_size": 128,
+    "num_workers": 0,
+    "epochs": 30,
+    "model": "ResNet32",
+    "hidden_dim": 200,
+    "vit_patch_size": 4,
+    "vit_dropout": 0.0,
+    "vit_attention_dropout": 0.0,
+    "vit_mlp_ratio": 4.0,
+    "optimizer": "sgd",
+    "lr": 2.0,
+    "momentum": 0.9,
+    "weight_decay": 1e-05,
+    "log_file": "",
+    "log_each_epoch": false,
+    "eval_every": 1,
+    "algorithm": "icarl",
+    "memory_budget": 2000,
+    "lr_decay": 5.0,
+    "prototype_flip": true
+  }
+}

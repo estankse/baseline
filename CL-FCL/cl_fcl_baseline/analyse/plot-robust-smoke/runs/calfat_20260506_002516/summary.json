@@ -1,0 +1,33 @@
+{
+  "log_file": "E:\\cc\\Keras\\github\\CL-FCL\\cl_fcl_baseline\\experiments\\robust\\logs\\calfat_20260506_002516.jsonl",
+  "method": "calfat",
+  "num_train_records": 42,
+  "num_eval_records": 42,
+  "final_eval": {
+    "accuracy": 0.39581,
+    "loss": 3.390323111343384,
+    "robust_accuracy": 0.30968,
+    "robust_loss": 4.328568293609619,
+    "num_eval_clients": 10.0,
+    "num_eval_samples": 10000.0,
+    "num_pgd_batches": 79.0,
+    "num_pgd_samples": 10000.0
+  },
+  "best_eval": {
+    "accuracy": 0.40021000000000007,
+    "loss": 3.315385541725159,
+    "robust_accuracy": 0.31218,
+    "robust_loss": 4.076187558441162
+  },
+  "pgd_config": {
+    "epsilon": 0.03137254901960784,
+    "step_size": 0.00784313725490196,
+    "steps": 10,
+    "random_start": true,
+    "normalized_space": false,
+    "max_batches": 0
+  },
+  "method_config": {
+    "prior_smoothing": 1e-06
+  }
+}

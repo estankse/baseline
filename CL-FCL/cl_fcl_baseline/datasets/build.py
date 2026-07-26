@@ -29,6 +29,40 @@ class RandomClassificationDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
         return self.features[index], self.targets[index]
 
 
+class PermutedPixelsDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
+    """Apply one fixed pixel permutation while preserving the class labels.
+
+    Permuted-MNIST uses the same ten-way classification problem in every
+    task.  Only the mapping from input pixels to network inputs changes.
+    Keeping this as a dataset wrapper ensures that train and test data use
+    exactly the same task permutation without copying either dataset.
+    """
+
+    def __init__(self, dataset: Dataset, permutation: Sequence[int]) -> None:
+        self.dataset = dataset
+        self.permutation = torch.as_tensor(permutation, dtype=torch.long).clone()
+        if self.permutation.ndim != 1 or self.permutation.numel() == 0:
+            raise ValueError("permutation must be a non-empty one-dimensional sequence.")
+        expected = torch.arange(self.permutation.numel(), dtype=torch.long)
+        if not torch.equal(torch.sort(self.permutation).values, expected):
+            raise ValueError("permutation must contain every flattened pixel index exactly once.")
+
+    def __len__(self) -> int:
+        return len(self.dataset)
+
+    def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor]:
+        sample, target = self.dataset[index]
+        if not isinstance(sample, torch.Tensor):
+            raise TypeError("PermutedPixelsDataset requires tensor samples.")
+        if sample.numel() != self.permutation.numel():
+            raise ValueError(
+                "Permutation length does not match the flattened sample size: "
+                f"{self.permutation.numel()} != {sample.numel()}."
+            )
+        permuted = sample.reshape(-1).index_select(0, self.permutation).view_as(sample)
+        return permuted, target
+
+
 class ClassIncrementalSubset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
     def __init__(
         self,
@@ -89,6 +123,9 @@ def partition_dataset_iid(dataset: Dataset, num_clients: int, seed: int = 0) -> 
 
 
 def _extract_labels(dataset: Dataset) -> List[int]:
+    if isinstance(dataset, Subset):
+        parent_labels = _extract_labels(dataset.dataset)
+        return [parent_labels[int(index)] for index in dataset.indices]
     if hasattr(dataset, "targets"):
         targets = getattr(dataset, "targets")
         if isinstance(targets, torch.Tensor):
@@ -103,10 +140,7 @@ def _extract_labels(dataset: Dataset) -> List[int]:
 
 
 def _subset_labels(dataset: Dataset, indices: Iterable[int]) -> List[int]:
-    base = dataset
-    if isinstance(dataset, Subset):
-        base = dataset.dataset
-    labels = _extract_labels(base)
+    labels = _extract_labels(dataset)
     return [labels[int(idx)] for idx in indices]
 
 

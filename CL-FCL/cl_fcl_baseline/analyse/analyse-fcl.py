@@ -1,8 +1,12 @@
 import json
-import matplotlib.pyplot as plt
 import os
 from collections import defaultdict
 import re
+
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 
 def ensure_dir(path):
     if not os.path.exists(path):
@@ -148,7 +152,7 @@ def plot_multi_lines(series_dict, title, xlabel, ylabel, save_path, separate_tas
 
 
 
-def plots_fcl(log_text, output_dir="plot-FCL"):
+def plots_fcl(log_text, output_dir="plot-FCL/FedWeIT"):
     """
     支持 federated continual learning 日志格式：
     - train: {"type":"train","task_id":"task_0","round":0,"metrics":{...}}
@@ -335,6 +339,6 @@ def plots_fcl(log_text, output_dir="plot-FCL"):
             )
 
 if __name__ == "__main__":
-    log_path = "../experiments/logs/fedweit_20260419_000346.jsonl"
+    log_path = "../experiments/logs/fedknow_20260718_181754.jsonl"
     with open(log_path, "r", encoding="utf-8") as f:
-        plots_fcl(f.read(), output_dir="plot-FCL")
+        plots_fcl(f.read(), output_dir="plot-FCL/FedKNOW")

@@ -1,0 +1,50 @@
+{
+  "log_file": "E:\\cc\\Keras\\github\\CL-FCL\\cl_fcl_baseline\\experiments\\robust\\logs\\sylva_20260519_002409.jsonl",
+  "method": "sylva",
+  "num_train_records": 36,
+  "num_eval_records": 36,
+  "final_eval": {
+    "accuracy": 0.25043000000000004,
+    "loss": 3.88232199092865,
+    "robust_accuracy": 0.09912000000000001,
+    "robust_loss": 5.429053959274292,
+    "global_accuracy": 0.3673,
+    "global_loss": 2.614914210891724,
+    "global_robust_accuracy": 0.1576,
+    "global_robust_loss": 3.8688279350280763,
+    "num_eval_clients": 10.0,
+    "num_eval_samples": 10000.0,
+    "num_pgd_batches": 79.0,
+    "num_pgd_samples": 10000.0
+  },
+  "best_eval": {
+    "accuracy": 0.25264000000000003,
+    "loss": 3.8640824441528316,
+    "robust_accuracy": 0.10124000000000002,
+    "robust_loss": 5.2064173339843745
+  },
+  "pgd_config": {
+    "epsilon": 0.03137254901960784,
+    "step_size": 0.00784313725490196,
+    "steps": 10,
+    "random_start": true,
+    "normalized_space": false,
+    "max_batches": 0
+  },
+  "method_config": {
+    "class_balance_power": 0.6,
+    "class_balance_smoothing": 0.001,
+    "dynamic_rounds": 3,
+    "clean_weight": 0.8,
+    "adv_weight": 1.25,
+    "kl_weight": 8.0,
+    "global_reg": 0.0001,
+    "agg_temperature": 0.7,
+    "agg_neighbors": 2,
+    "phase2_epochs": 10,
+    "phase2_topk_layers": 1,
+    "phase2_tradeoff": 0.7,
+    "phase2_lr_scale": 0.0015,
+    "phase2_max_batches": 10
+  }
+}

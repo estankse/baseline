@@ -4,6 +4,7 @@ import argparse
 import json
 from datetime import datetime
 from pathlib import Path
+import warnings
 
 import torch
 from torch.utils.data import Dataset
@@ -12,6 +13,7 @@ from cl_fcl_baseline.algorithms.CL_robust.AFLC_RAER import AFLCRAERLearner
 from cl_fcl_baseline.algorithms.FL_robust.PGD import PGDConfig
 from cl_fcl_baseline.contracts import TaskDefinition
 from cl_fcl_baseline.datasets import (
+    IndexedDataset,
     RandomClassificationDataset,
     build_class_incremental_tasks,
     build_dataloader,
@@ -49,13 +51,35 @@ def _build_optimizer(
     )
 
 
+def _protocol_warnings(args: argparse.Namespace) -> list[str]:
+    messages: list[str] = []
+    if str(args.dataset).lower() == "cifar100" and int(args.memory_budget) not in {
+        500,
+        2000,
+    }:
+        messages.append(
+            "The paper evaluates Split-CIFAR100 with memory_budget 500 or 2000; "
+            f"the configured value {int(args.memory_budget)} changes AFLC's "
+            "class-count margin and is not a paper setting."
+        )
+    if int(args.epochs) < 50:
+        messages.append(
+            "The paper protocol trains each task for 50 epochs; a shorter run is "
+            "suitable for smoke testing but does not reproduce its final accuracy."
+        )
+    return messages
+
+
 def _build_pgd_config(args: argparse.Namespace, *, evaluation: bool) -> PGDConfig:
     steps = int(args.eval_pgd_steps if evaluation else args.pgd_steps)
+    raw_step_size = float(
+        args.eval_pgd_step_size if evaluation else args.pgd_step_size
+    )
     key = str(args.dataset).lower()
     if key not in NORMALIZATION_STATS:
         return PGDConfig(
             epsilon=float(args.pgd_epsilon),
-            step_size=float(args.pgd_step_size),
+            step_size=raw_step_size,
             steps=steps,
             random_start=bool(args.pgd_random_start),
         )
@@ -64,10 +88,10 @@ def _build_pgd_config(args: argparse.Namespace, *, evaluation: bool) -> PGDConfi
     clip_max = [(1.0 - value) / scale for value, scale in zip(mean, std)]
     if args.pgd_normalized_space:
         epsilon: float | list[float] = float(args.pgd_epsilon)
-        step_size: float | list[float] = float(args.pgd_step_size)
+        step_size: float | list[float] = raw_step_size
     else:
         epsilon = [float(args.pgd_epsilon) / scale for scale in std]
-        step_size = [float(args.pgd_step_size) / scale for scale in std]
+        step_size = [raw_step_size / scale for scale in std]
     return PGDConfig(
         epsilon=epsilon,
         step_size=step_size,
@@ -149,7 +173,9 @@ def _build_task_stream(
                 metadata={"classes": list(train_split.class_ids)},
             )
         )
-        train_datasets[task_id] = train_split
+        # RAER scores the augmented stream view but stores the corresponding
+        # raw sample so replay can draw a fresh crop/flip on every visit.
+        train_datasets[task_id] = IndexedDataset(train_split)
         test_datasets[task_id] = test_split
     return tasks, train_datasets, test_datasets, input_shape, total_num_classes
 
@@ -185,6 +211,9 @@ def _continual_metrics(
 
 def main() -> None:
     args = parse_aflc_raer_args()
+    protocol_warnings = _protocol_warnings(args)
+    for message in protocol_warnings:
+        warnings.warn(message, stacklevel=1)
     set_seed(args.seed)
     device = torch.device(
         "cuda"
@@ -228,7 +257,12 @@ def main() -> None:
     with open(log_path, "a", encoding="utf-8") as handle:
         handle.write(
             json.dumps(
-                {"type": "config", "args": vars(args), "resolved_device": str(device)},
+                {
+                    "type": "config",
+                    "args": vars(args),
+                    "resolved_device": str(device),
+                    "protocol_warnings": protocol_warnings,
+                },
                 ensure_ascii=False,
             )
             + "\n"
@@ -250,13 +284,18 @@ def main() -> None:
             learned_tasks = tasks[: task_index + 1]
             learned_task_ids = [seen_task.task_id for seen_task in learned_tasks]
             for seen_task in learned_tasks:
-                clean = learner.evaluate(test_loaders[seen_task.task_id], seen_task.task_id)
+                clean = learner.evaluate(
+                    test_loaders[seen_task.task_id], seen_task.task_id
+                )
                 robust = learner.evaluate_robust(
                     test_loaders[seen_task.task_id],
                     seen_task.task_id,
                     max_batches=args.pgd_max_batches,
                 )
-                task_metrics[seen_task.task_id] = {**clean, **robust}
+                task_metrics[seen_task.task_id] = {
+                    **clean,
+                    **robust,
+                }
                 clean_row[seen_task.task_id] = float(clean["accuracy"])
                 robust_row[seen_task.task_id] = float(robust["robust_accuracy"])
             clean_summary = _continual_metrics(
@@ -312,6 +351,20 @@ def main() -> None:
             task, train_loaders[task.task_id], args.epochs, epoch_callback=_on_epoch
         )
         learner.end_task(task, train_loaders[task.task_id])
+        memory_counts = {
+            str(class_id): len(learner.exemplar_sets.get(class_id, []))
+            for class_id in learner.seen_classes
+        }
+        memory_record = {
+            "type": "memory",
+            "task_id": task.task_id,
+            "task_index": task_index,
+            "total": sum(memory_counts.values()),
+            "budget": int(args.memory_budget),
+            "per_class": memory_counts,
+        }
+        with open(log_path, "a", encoding="utf-8") as handle:
+            handle.write(json.dumps(memory_record, ensure_ascii=False) + "\n")
         if last_clean_row is None or last_eval_epoch != completed_epochs:
             last_clean_row, last_robust_row = _evaluate(max(0, completed_epochs - 1))
         clean_matrix.append(last_clean_row)

@@ -82,7 +82,13 @@ class DAMLLearner(RobustReplayLearner):
             unified_inputs, unified_labels, class_ids=self.seen_classes
         )
         logits, binary_targets = self._unified_targets(adversarial, unified_labels)
-        unified_loss = F.binary_cross_entropy_with_logits(logits, binary_targets)
+        # iCaRL's unified objective sums the binary class terms for each
+        # sample, then averages samples.  PyTorch's default BCE reduction also
+        # averages over classes, which weakens distillation/new-class learning
+        # by 1 / len(seen_classes) relative to DAML's additional CE term.
+        unified_loss = F.binary_cross_entropy_with_logits(
+            logits, binary_targets, reduction="none"
+        ).sum(dim=1).mean()
 
         additional_loss = unified_loss.new_zeros(())
         additional = self.sample_memory(replay_count, exclude=excluded)

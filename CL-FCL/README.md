@@ -1,6 +1,6 @@
 ﻿# CL-FCL Baseline
 
-A compact, explicit PyTorch baseline for **Federated Learning (FL)** and **Federated Continual Learning (FCL)**, plus implementations of **FedKEMF**, **FedAvg**, **FedProx**, **Scaffold**, **MOON**, and **FedWeIT**.
+A compact, explicit PyTorch baseline for **Continual Learning (CL)**, **Adversarial Continual Learning (CL+AT)**, **Federated Learning (FL)**, and **Federated Continual Learning (FCL)**, plus implementations of **FedKEMF**, **FedAvg**, **FedProx**, **Scaffold**, **MOON**, and **FedWeIT**.
 
 The code intentionally avoids:
 - registries
@@ -19,6 +19,17 @@ Federated Continual Learning (FCL)
 - `NaiveContinualStrategy`
 - `ContinualClient`, `FCLServer`, `FCLExperiment`
 
+Standalone Continual Learning (CL)
+- EWC, GEM, Learning without Forgetting (LwF), and iCaRL
+- runners under `cl_fcl_baseline/experiments/CL/`
+- algorithms under `cl_fcl_baseline/algorithms/CL/`
+
+Adversarial Continual Learning (CL+AT)
+- AFLC-RAER, DAML, FLAIR, and TABA
+- clean and PGD-robust continual evaluation
+- runners under `cl_fcl_baseline/experiments/CL_robust/`
+- algorithms under `cl_fcl_baseline/algorithms/CL_robust/`
+
 FedKEMF (knowledge distillation + multi-model fusion)
 - `FedKEMClient`
 - `FedKEMServerAggregator`
@@ -36,11 +47,11 @@ FedWeIT Federated Continual Learning
 - `FCL_robust/run_FedWeIT_Sylva.py` combines FedWeIT with Sylva-inspired personalized adversarial fine-tuning
 
 Standalone robust FL baselines
-- `robust/run_FAT.py`
-- `robust/run_SFAT.py`
-- `robust/run_CalFAT.py`
-- `robust/run_RBN.py`
-- `robust/run_Sylva.py`
+- `FL_robust/run_FAT.py`
+- `FL_robust/run_SFAT.py`
+- `FL_robust/run_CalFAT.py`
+- `FL_robust/run_RBN.py`
+- `FL_robust/run_Sylva.py`
 
 FedProx (proximal regularization)
 - `FedProxClient`, `FedProxTrainer`
@@ -77,9 +88,20 @@ Run MOON:
 python -m cl_fcl_baseline.experiments.run_MOON
 ```
 
-Run FCL:
+Run standalone CL:
 ```bash
-python -m cl_fcl_baseline.experiments.run_fcl
+python -m cl_fcl_baseline.experiments.CL.run_EWC
+python -m cl_fcl_baseline.experiments.CL.run_GEM
+python -m cl_fcl_baseline.experiments.CL.run_LwF
+python -m cl_fcl_baseline.experiments.CL.run_iCaRL
+```
+
+Run CL+AT:
+```bash
+python -m cl_fcl_baseline.experiments.CL_robust.run_AFLC_RAER
+python -m cl_fcl_baseline.experiments.CL_robust.run_DAML
+python -m cl_fcl_baseline.experiments.CL_robust.run_FLAIR
+python -m cl_fcl_baseline.experiments.CL_robust.run_TABA
 ```
 
 Run FedWeIT:
@@ -87,7 +109,7 @@ Run FedWeIT:
 python -m cl_fcl_baseline.experiments.run_FedWeIT
 ```
 
-Robust FedWeIT runners live under `cl_fcl_baseline/experiments/FCL_robust/` and the standalone robust FL baselines live under `cl_fcl_baseline/experiments/robust/`.
+Robust FedWeIT runners live under `cl_fcl_baseline/experiments/FCL_robust/` and the standalone robust FL baselines live under `cl_fcl_baseline/experiments/FL_robust/`.
 
 Run FedWeIT-PGD:
 ```bash
@@ -121,39 +143,39 @@ python cl_fcl_baseline/experiments/FCL_robust/run_FedWeIT_Sylva.py
 
 Run standalone FAT:
 ```bash
-python cl_fcl_baseline/experiments/robust/run_FAT.py
+python cl_fcl_baseline/experiments/FL_robust/run_FAT.py
 ```
 
 Run standalone SFAT:
 ```bash
-python cl_fcl_baseline/experiments/robust/run_SFAT.py
+python cl_fcl_baseline/experiments/FL_robust/run_SFAT.py
 ```
 
 Run standalone CalFAT:
 ```bash
-python cl_fcl_baseline/experiments/robust/run_CalFAT.py
+python cl_fcl_baseline/experiments/FL_robust/run_CalFAT.py
 ```
 
 Run standalone RBN:
 ```bash
-python cl_fcl_baseline/experiments/robust/run_RBN.py
+python cl_fcl_baseline/experiments/FL_robust/run_RBN.py
 ```
 
 Run standalone Sylva:
 ```bash
-python cl_fcl_baseline/experiments/robust/run_Sylva.py
+python cl_fcl_baseline/experiments/FL_robust/run_Sylva.py
 ```
 
-Analyse standalone robust logs in `cl_fcl_baseline/experiments/robust/logs`:
+Analyse standalone robust logs in `cl_fcl_baseline/experiments/FL_robust/logs`:
 ```bash
-python cl_fcl_baseline/analyse/analyse-robust.py
+python cl_fcl_baseline/analyse/analyse-fl-robust.py
 ```
 
-The script writes per-run plots plus latest-per-method comparisons to `cl_fcl_baseline/analyse/plot-robust/`.
+The script writes per-run plots plus latest-per-method comparisons to `cl_fcl_baseline/analyse/plot-FL-robust/`.
 
 **Standalone robust FL usage notes**
 
-The standalone robust runners under `cl_fcl_baseline/experiments/robust/` follow the standard FL data partitioning flow and add robust local training and/or robust evaluation on top of it. They all use the shared argument definitions in `cl_fcl_baseline/experiments/args.py`, emit JSONL logs into `cl_fcl_baseline/experiments/robust/logs/`, and can be visualized with `cl_fcl_baseline/analyse/analyse-robust.py`.
+The standalone robust runners under `cl_fcl_baseline/experiments/FL_robust/` follow the standard FL data partitioning flow and add robust local training and/or robust evaluation on top of it. They all use the shared argument definitions in `cl_fcl_baseline/experiments/args.py`, emit JSONL logs into `cl_fcl_baseline/experiments/FL_robust/logs/`, and can be visualized with `cl_fcl_baseline/analyse/analyse-fl-robust.py`.
 
 Common options:
 - `--num-clients` total clients
@@ -185,7 +207,7 @@ Method-specific options:
 
 Example:
 ```bash
-python cl_fcl_baseline/experiments/robust/run_FAT.py \
+python cl_fcl_baseline/experiments/FL_robust/run_FAT.py \
   --seed 0 \
   --dataset cifar10 \
   --model ResNet18 \
@@ -208,8 +230,8 @@ python cl_fcl_baseline/experiments/robust/run_FAT.py \
 ```
 
 result:
-![FedWeIT](cl_fcl_baseline/analyse/plot-robust/runs/fat/eval/accuracy.png)
-![FedWeIT](cl_fcl_baseline/analyse/plot-robust/runs/fat/eval/robust_accuracy.png)
+![FAT accuracy](cl_fcl_baseline/analyse/plot-FL-robust/runs/fat/eval/accuracy.png)
+![FAT robust accuracy](cl_fcl_baseline/analyse/plot-FL-robust/runs/fat/eval/robust_accuracy.png)
 
 
 ### **SFAT usage notes**
@@ -226,7 +248,7 @@ Method-specific options:
 
 Example:
 ```bash
-python cl_fcl_baseline/experiments/robust/run_SFAT.py \
+python cl_fcl_baseline/experiments/FL_robust/run_SFAT.py \
   --seed 0 \
   --dataset cifar10 \
   --model ResNet18 \
@@ -252,8 +274,8 @@ python cl_fcl_baseline/experiments/robust/run_SFAT.py \
 ```
 
 result:
-![FedWeIT](cl_fcl_baseline/analyse/plot-robust/runs/sfat/eval/accuracy.png)
-![FedWeIT](cl_fcl_baseline/analyse/plot-robust/runs/sfat/eval/robust_accuracy.png)
+![SFAT accuracy](cl_fcl_baseline/analyse/plot-FL-robust/runs/sfat/eval/accuracy.png)
+![SFAT robust accuracy](cl_fcl_baseline/analyse/plot-FL-robust/runs/sfat/eval/robust_accuracy.png)
 
 ### **CalFAT usage notes**
 
@@ -264,7 +286,7 @@ Method-specific options:
 
 Example:
 ```bash
-python cl_fcl_baseline/experiments/robust/run_CalFAT.py \
+python cl_fcl_baseline/experiments/FL_robust/run_CalFAT.py \
   --seed 0 \
   --dataset cifar10 \
   --model ResNet18 \
@@ -285,8 +307,8 @@ python cl_fcl_baseline/experiments/robust/run_CalFAT.py \
 ```
 
 result:
-![FedWeIT](cl_fcl_baseline/analyse/plot-robust/runs/calfat/eval/accuracy.png)
-![FedWeIT](cl_fcl_baseline/analyse/plot-robust/runs/calfat/eval/robust_accuracy.png)
+![CalFAT accuracy](cl_fcl_baseline/analyse/plot-FL-robust/runs/calfat/eval/accuracy.png)
+![CalFAT robust accuracy](cl_fcl_baseline/analyse/plot-FL-robust/runs/calfat/eval/robust_accuracy.png)
 
 
 ### **RBN usage notes**
@@ -305,7 +327,7 @@ Method-specific options:
 
 Example:
 ```bash
-python cl_fcl_baseline/experiments/robust/run_RBN.py \
+python cl_fcl_baseline/experiments/FL_robust/run_RBN.py \
   --seed 0 \
   --dataset cifar10 \
   --model ResNet18 \
@@ -330,8 +352,8 @@ python cl_fcl_baseline/experiments/robust/run_RBN.py \
 ```
 
 result:
-![FedWeIT](cl_fcl_baseline/analyse/plot-robust/runs/rbn/eval/accuracy.png)
-![FedWeIT](cl_fcl_baseline/analyse/plot-robust/runs/rbn/eval/robust_accuracy.png)
+![RBN accuracy](cl_fcl_baseline/analyse/plot-FL-robust/runs/rbn/eval/accuracy.png)
+![RBN robust accuracy](cl_fcl_baseline/analyse/plot-FL-robust/runs/rbn/eval/robust_accuracy.png)
 
 ### **Sylva usage notes**
 
@@ -355,7 +377,7 @@ Method-specific options:
 
 Example:
 ```bash
-python cl_fcl_baseline/experiments/robust/run_Sylva.py \
+python cl_fcl_baseline/experiments/FL_robust/run_Sylva.py \
   --seed 0 \
   --dataset cifar10 \
   --model ResNet18 \
@@ -389,8 +411,8 @@ python cl_fcl_baseline/experiments/robust/run_Sylva.py \
 ```
 
 result:
-![FedWeIT](cl_fcl_baseline/analyse/plot-robust/runs/sylva/eval/accuracy.png)
-![FedWeIT](cl_fcl_baseline/analyse/plot-robust/runs/sylva/eval/robust_accuracy.png)
+![Sylva accuracy](cl_fcl_baseline/analyse/plot-FL-robust/runs/sylva/eval/accuracy.png)
+![Sylva robust accuracy](cl_fcl_baseline/analyse/plot-FL-robust/runs/sylva/eval/robust_accuracy.png)
 
 
 **FedWeIT usage notes**
@@ -438,9 +460,9 @@ python -m cl_fcl_baseline.experiments.run_FedWeIT \
 ```
 
 result:
-![FedWeIT](cl_fcl_baseline/analyse/plot-FedWeIT/eval_avg_global/global_avg_accuracy.png)
-![FedWeIT](cl_fcl_baseline/analyse/plot-FedWeIT/eval_avg_global/global_avg_loss.png)
-![FedWeIT](cl_fcl_baseline/analyse/plot-FedWeIT/eval_compare/all_tasks_accuracy.png)
+![FedWeIT](cl_fcl_baseline/analyse/plot-FCL/FedWeIT/eval_avg_global/global_avg_accuracy.png)
+![FedWeIT](cl_fcl_baseline/analyse/plot-FCL/FedWeIT/eval_avg_global/global_avg_loss.png)
+![FedWeIT](cl_fcl_baseline/analyse/plot-FCL/FedWeIT/eval_compare/all_tasks_accuracy.png)
 
 
 ### **FedWeIT-PGD**
@@ -477,10 +499,10 @@ python cl_fcl_baseline/experiments/FCL_robust/run_FedWeIT_PGD.py \
   --pgd-max-batches 0 \
 ```
 result:
-![FedWeIT](cl_fcl_baseline/analyse/plot-FedWeIT-robust/eval_avg_global/global_avg_accuracy.png)
-![FedWeIT](cl_fcl_baseline/analyse/plot-FedWeIT-robust/eval_avg_global/global_avg_robust_accuracy.png)
-![FedWeIT](cl_fcl_baseline/analyse/plot-FedWeIT-robust/eval_compare/all_tasks_accuracy.png)
-![FedWeIT](cl_fcl_baseline/analyse/plot-FedWeIT-robust/eval_compare/all_tasks_robust_accuracy.png)
+![FedWeIT](cl_fcl_baseline/analyse/plot-FCL-robust/FedWeIT-PGD/eval_avg_global/global_avg_accuracy.png)
+![FedWeIT](cl_fcl_baseline/analyse/plot-FCL-robust/FedWeIT-PGD/eval_avg_global/global_avg_robust_accuracy.png)
+![FedWeIT](cl_fcl_baseline/analyse/plot-FCL-robust/FedWeIT-PGD/eval_compare/all_tasks_accuracy.png)
+![FedWeIT](cl_fcl_baseline/analyse/plot-FCL-robust/FedWeIT-PGD/eval_compare/all_tasks_robust_accuracy.png)
 
 ### **FedWeIT-FAT**
 
@@ -517,10 +539,10 @@ python cl_fcl_baseline/experiments/FCL_robust/run_FedWeIT_FAT.py \
   --pgd-steps 10
 ```
 result:
-![FedWeIT-FAT](cl_fcl_baseline/analyse/plot-FedWeIT-FAT/eval_avg_global/global_avg_accuracy.png)
-![FedWeIT-FAT](cl_fcl_baseline/analyse/plot-FedWeIT-FAT/eval_avg_global/global_avg_robust_accuracy.png)
-![FedWeIT-FAT](cl_fcl_baseline/analyse/plot-FedWeIT-FAT/eval_compare/all_tasks_accuracy.png)
-![FedWeIT-FAT](cl_fcl_baseline/analyse/plot-FedWeIT-FAT/eval_compare/all_tasks_robust_accuracy.png)
+![FedWeIT-FAT](cl_fcl_baseline/analyse/plot-FCL-robust/FedWeIT-FAT/eval_avg_global/global_avg_accuracy.png)
+![FedWeIT-FAT](cl_fcl_baseline/analyse/plot-FCL-robust/FedWeIT-FAT/eval_avg_global/global_avg_robust_accuracy.png)
+![FedWeIT-FAT](cl_fcl_baseline/analyse/plot-FCL-robust/FedWeIT-FAT/eval_compare/all_tasks_accuracy.png)
+![FedWeIT-FAT](cl_fcl_baseline/analyse/plot-FCL-robust/FedWeIT-FAT/eval_compare/all_tasks_robust_accuracy.png)
 
 
 
@@ -564,10 +586,10 @@ python cl_fcl_baseline/experiments/FCL_robust/run_FedWeIT_SFAT.py \
   --pgd-steps 10
 ```
 result:
-![FedWeIT-SFAT](cl_fcl_baseline/analyse/plot-FedWeIT-SFAT/eval_avg_global/global_avg_accuracy.png)
-![FedWeIT-SFAT](cl_fcl_baseline/analyse/plot-FedWeIT-SFAT/eval_avg_global/global_avg_robust_accuracy.png)
-![FedWeIT-SFAT](cl_fcl_baseline/analyse/plot-FedWeIT-SFAT/eval_compare/all_tasks_accuracy.png)
-![FedWeIT-SFAT](cl_fcl_baseline/analyse/plot-FedWeIT-SFAT/eval_compare/all_tasks_robust_accuracy.png)
+![FedWeIT-SFAT](cl_fcl_baseline/analyse/plot-FCL-robust/FedWeIT-SFAT/eval_avg_global/global_avg_accuracy.png)
+![FedWeIT-SFAT](cl_fcl_baseline/analyse/plot-FCL-robust/FedWeIT-SFAT/eval_avg_global/global_avg_robust_accuracy.png)
+![FedWeIT-SFAT](cl_fcl_baseline/analyse/plot-FCL-robust/FedWeIT-SFAT/eval_compare/all_tasks_accuracy.png)
+![FedWeIT-SFAT](cl_fcl_baseline/analyse/plot-FCL-robust/FedWeIT-SFAT/eval_compare/all_tasks_robust_accuracy.png)
 
 ### **FedWeIT-CalFAT**
 
@@ -601,10 +623,10 @@ python cl_fcl_baseline/experiments/FCL_robust/run_FedWeIT_CalFAT.py \
   --pgd-steps 10
 ```
 result:
-![FedWeIT-CalFAT](cl_fcl_baseline/analyse/plot-FedWeIT-CalFAT/eval_avg_global/global_avg_accuracy.png)
-![FedWeIT-CalFAT](cl_fcl_baseline/analyse/plot-FedWeIT-CalFAT/eval_avg_global/global_avg_robust_accuracy.png)
-![FedWeIT-CalFAT](cl_fcl_baseline/analyse/plot-FedWeIT-CalFAT/eval_compare/all_tasks_accuracy.png)
-![FedWeIT-CalFAT](cl_fcl_baseline/analyse/plot-FedWeIT-CalFAT/eval_compare/all_tasks_robust_accuracy.png)
+![FedWeIT-CalFAT](cl_fcl_baseline/analyse/plot-FCL-robust/FedWeIT-CalFAT/eval_avg_global/global_avg_accuracy.png)
+![FedWeIT-CalFAT](cl_fcl_baseline/analyse/plot-FCL-robust/FedWeIT-CalFAT/eval_avg_global/global_avg_robust_accuracy.png)
+![FedWeIT-CalFAT](cl_fcl_baseline/analyse/plot-FCL-robust/FedWeIT-CalFAT/eval_compare/all_tasks_accuracy.png)
+![FedWeIT-CalFAT](cl_fcl_baseline/analyse/plot-FCL-robust/FedWeIT-CalFAT/eval_compare/all_tasks_robust_accuracy.png)
 
 
 ### **FedWeIT-RBN**
@@ -651,15 +673,11 @@ python cl_fcl_baseline/experiments/FCL_robust/run_FedWeIT_RBN.py \
   --pgd-steps 10
 ```
 
-[//]: # (result:)
-
-[//]: # (![FedWeIT-RBN]&#40;cl_fcl_baseline/analyse/plot-FedWeIT-CalFAT/eval_avg_global/global_avg_accuracy.png&#41;)
-
-[//]: # (![FedWeIT-RBN]&#40;cl_fcl_baseline/analyse/plot-FedWeIT-CalFAT/eval_avg_global/global_avg_robust_accuracy.png&#41;)
-
-[//]: # (![FedWeIT-RBN]&#40;cl_fcl_baseline/analyse/plot-FedWeIT-CalFAT/eval_compare/all_tasks_accuracy.png&#41;)
-
-[//]: # (![FedWeIT-RBN]&#40;cl_fcl_baseline/analyse/plot-FedWeIT-CalFAT/eval_compare/all_tasks_robust_accuracy.png&#41;)
+result:
+![FedWeIT-RBN](cl_fcl_baseline/analyse/plot-FCL-robust/FedWeIT-RBN/eval_avg_global/global_avg_accuracy.png)
+![FedWeIT-RBN](cl_fcl_baseline/analyse/plot-FCL-robust/FedWeIT-RBN/eval_avg_global/global_avg_robust_accuracy.png)
+![FedWeIT-RBN](cl_fcl_baseline/analyse/plot-FCL-robust/FedWeIT-RBN/eval_compare/all_tasks_accuracy.png)
+![FedWeIT-RBN](cl_fcl_baseline/analyse/plot-FCL-robust/FedWeIT-RBN/eval_compare/all_tasks_robust_accuracy.png)
 
 
 ### **FedWeIT-Sylva**
@@ -711,11 +729,323 @@ python cl_fcl_baseline/experiments/FCL_robust/run_FedWeIT_Sylva.py \
   --pgd-steps 10
 ```
 result:
-![FedWeIT-Sylva](cl_fcl_baseline/analyse/plot-FedWeIT-Sylva/eval_avg_global/global_avg_accuracy.png)
-![FedWeIT-Sylva](cl_fcl_baseline/analyse/plot-FedWeIT-Sylva/eval_avg_global/global_avg_robust_accuracy.png)
-![FedWeIT-Sylva](cl_fcl_baseline/analyse/plot-FedWeIT-Sylva/eval_compare/all_tasks_accuracy.png)
-![FedWeIT-Sylva](cl_fcl_baseline/analyse/plot-FedWeIT-Sylva/eval_compare/all_tasks_robust_accuracy.png)
+![FedWeIT-Sylva](cl_fcl_baseline/analyse/plot-FCL-robust/FedWeIT-Sylva/eval_avg_global/global_avg_accuracy.png)
+![FedWeIT-Sylva](cl_fcl_baseline/analyse/plot-FCL-robust/FedWeIT-Sylva/eval_avg_global/global_avg_robust_accuracy.png)
+![FedWeIT-Sylva](cl_fcl_baseline/analyse/plot-FCL-robust/FedWeIT-Sylva/eval_compare/all_tasks_accuracy.png)
+![FedWeIT-Sylva](cl_fcl_baseline/analyse/plot-FCL-robust/FedWeIT-Sylva/eval_compare/all_tasks_robust_accuracy.png)
 
+
+**Standalone CL usage notes**
+
+The runners under `cl_fcl_baseline/experiments/CL/` train one model over a sequence of tasks and write JSONL logs to `cl_fcl_baseline/experiments/CL/logs/`. Evaluation records contain the current average accuracy, average forgetting, backward transfer, and per-task accuracy.
+
+Common options:
+- `--scenario` `class`, `task`, or `domain`
+- `--dataset` `random_classification`, `mnist`, `cifar10`, or `cifar100`
+- `--num-tasks` number of tasks; `0` derives it from the dataset and `--classes-per-task`
+- `--classes-per-task` number of classes introduced by each class split
+- `--task-order-shuffle` / `--no-task-order-shuffle` control class-order randomization
+- `--epochs` local training epochs per task
+- `--batch-size`, `--lr`, `--optimizer`, `--momentum`, and `--weight-decay` control optimization
+- `--eval-every` evaluation interval in epochs; `<=0` evaluates only at task end
+- `--log-file` explicit JSONL path; an empty value uses the runner's automatic name
+
+### **EWC**
+
+EWC estimates parameter importance with the Fisher information after each task and penalizes changes to parameters important to earlier tasks.
+
+Method-specific options:
+- `--ewc-lambda` weight of the EWC quadratic penalty
+- `--fisher-samples` maximum samples used to estimate the Fisher information
+- `--fisher-mode` `sampled` for sampled-label Fisher or `empirical` for ground-truth-label Fisher
+
+Example:
+```bash
+python -m cl_fcl_baseline.experiments.CL.run_EWC \
+  --scenario task \
+  --dataset cifar100 \
+  --model ResNet32 \
+  --classes-per-task 10 \
+  --epochs 20 \
+  --batch-size 64 \
+  --optimizer sgd \
+  --lr 0.001 \
+  --ewc-lambda 400 \
+  --fisher-samples 200 \
+  --fisher-mode sampled
+```
+
+result:
+![EWC average accuracy](cl_fcl_baseline/analyse/plot-CL/runs/cl_ewc_20260717_125354/eval_average/average_accuracy.png)
+![EWC task accuracy](cl_fcl_baseline/analyse/plot-CL/runs/cl_ewc_20260717_125354/eval_compare/all_tasks_accuracy.png)
+
+### **GEM**
+
+GEM stores episodic samples from previous tasks and projects a new-task gradient when it would increase a remembered task's loss.
+
+Method-specific options:
+- `--memory-size` episodic examples retained per task
+- `--memory-strength` GEM margin parameter
+- `--qp-eps` diagonal stabilization used by the gradient-projection QP
+
+Example:
+```bash
+python -m cl_fcl_baseline.experiments.CL.run_GEM \
+  --scenario task \
+  --dataset cifar100 \
+  --model ResNet32 \
+  --classes-per-task 10 \
+  --epochs 20 \
+  --batch-size 64 \
+  --optimizer sgd \
+  --lr 0.001 \
+  --memory-size 256 \
+  --memory-strength 0.5 \
+  --qp-eps 0.001
+```
+
+result:
+![GEM average accuracy](cl_fcl_baseline/analyse/plot-CL/runs/cl_gem_20260717_124443/eval_average/average_accuracy.png)
+![GEM task accuracy](cl_fcl_baseline/analyse/plot-CL/runs/cl_gem_20260717_124443/eval_compare/all_tasks_accuracy.png)
+
+### **LwF**
+
+Learning without Forgetting snapshots the previous model and distills its old-task predictions while learning the current task.
+
+Method-specific options:
+- `--temperature` distillation temperature
+- `--distillation-weight` weight of the old-task distillation loss
+- `--warmup-epochs` new-task-only warmup epochs before distillation
+
+Example:
+```bash
+python -m cl_fcl_baseline.experiments.CL.run_LwF \
+  --scenario task \
+  --dataset cifar100 \
+  --model ResNet32 \
+  --classes-per-task 10 \
+  --epochs 30 \
+  --batch-size 128 \
+  --optimizer sgd \
+  --lr 0.001 \
+  --weight-decay 0.0005 \
+  --temperature 2 \
+  --distillation-weight 1 \
+  --warmup-epochs 1
+```
+
+result:
+![LwF average accuracy](cl_fcl_baseline/analyse/plot-CL/runs/cl_lwf_20260717_200855/eval_average/average_accuracy.png)
+![LwF task accuracy](cl_fcl_baseline/analyse/plot-CL/runs/cl_lwf_20260717_200855/eval_compare/all_tasks_accuracy.png)
+
+### **iCaRL**
+
+iCaRL combines exemplar rehearsal, distillation, herding-based exemplar selection, and nearest-mean-of-exemplars prediction for class-incremental learning.
+
+Method-specific options:
+- `--memory-budget` fixed total exemplar budget
+- `--lr-decay` learning-rate decay factor used by the task schedule
+- `--prototype-flip` / `--no-prototype-flip` control horizontal-flip averaging for CIFAR prototypes
+
+Example:
+```bash
+python -m cl_fcl_baseline.experiments.CL.run_iCaRL \
+  --scenario class \
+  --dataset cifar100 \
+  --model ResNet32 \
+  --classes-per-task 10 \
+  --task-order-shuffle \
+  --epochs 70 \
+  --batch-size 128 \
+  --optimizer sgd \
+  --lr 2.0 \
+  --weight-decay 0.00001 \
+  --memory-budget 2000 \
+  --lr-decay 5 \
+  --prototype-flip
+```
+
+result:
+![iCaRL average accuracy](cl_fcl_baseline/analyse/plot-CL/runs/cl_icarl_20260718_131432/eval_average/average_accuracy.png)
+![iCaRL task accuracy](cl_fcl_baseline/analyse/plot-CL/runs/cl_icarl_20260718_131432/eval_compare/all_tasks_accuracy.png)
+
+**Adversarial continual-learning (CL+AT) usage notes**
+
+AFLC-RAER, DAML, FLAIR, and TABA live under `cl_fcl_baseline/experiments/CL_robust/`. They use class-incremental replay plus adversarial training and log both clean and PGD-robust continual metrics to `cl_fcl_baseline/experiments/CL_robust/logs/`.
+
+Common CL+AT options include the standalone CL options above plus:
+- `--memory-budget` fixed total replay-memory budget
+- `--replay-batch-size` replay minibatch size; `0` matches the stream batch size
+- `--pgd-epsilon`, `--pgd-step-size`, and `--pgd-steps` control the training attack
+- `--pgd-random-start` / `--no-pgd-random-start` toggle random PGD initialization
+- `--pgd-normalized-space` interprets attack magnitudes in normalized input space
+- `--eval-pgd-steps` and `--eval-pgd-step-size` independently control robust evaluation
+- `--pgd-max-batches` limits robust evaluation; `<=0` uses the full evaluation set
+
+### **AFLC-RAER**
+
+AFLC applies anti-forgetting logit calibration during adversarial replay, while RAER selects replay samples according to their PGD robustness difficulty.
+
+Method-specific options:
+- `--aflc-alpha` logit-calibration strength
+- `--raer-threshold` maximum PGD success count accepted by RAER
+- `--future-prior` / `--no-future-prior` toggle the future-head prior
+- `--adaptive-eval-attack` attacks through AFLC calibration during evaluation
+
+Example:
+```bash
+python -m cl_fcl_baseline.experiments.CL_robust.run_AFLC_RAER \
+  --dataset cifar100 \
+  --model ResNet18 \
+  --classes-per-task 10 \
+  --epochs 30 \
+  --batch-size 32 \
+  --optimizer sgd \
+  --lr 0.1 \
+  --memory-budget 2000 \
+  --aflc-alpha 3.5 \
+  --raer-threshold 5 \
+  --future-prior \
+  --pgd-epsilon 0.031372549 \
+  --pgd-step-size 0.007843137 \
+  --pgd-steps 10 \
+  --eval-pgd-steps 10
+```
+
+result:
+![AFLC-RAER clean average accuracy](cl_fcl_baseline/analyse/plot-CL-robust/runs/cl_robust_aflc_raer_20260725_225622/eval_average/clean_average_accuracy.png)
+![AFLC-RAER robust average accuracy](cl_fcl_baseline/analyse/plot-CL-robust/runs/cl_robust_aflc_raer_20260725_225622/eval_average/robust_average_accuracy.png)
+![AFLC-RAER clean task accuracy](cl_fcl_baseline/analyse/plot-CL-robust/runs/cl_robust_aflc_raer_20260725_225622/eval_compare/all_tasks_accuracy.png)
+![AFLC-RAER robust task accuracy](cl_fcl_baseline/analyse/plot-CL-robust/runs/cl_robust_aflc_raer_20260725_225622/eval_compare/all_tasks_robust_accuracy.png)
+
+### **DAML**
+
+DAML combines a unified BCE distillation target on adversarial stream/replay samples with an additional loss on a disjoint memory minibatch.
+
+Method-specific option:
+- `--daml-alpha` weight of the additional memory classification loss
+
+Example:
+```bash
+python -m cl_fcl_baseline.experiments.CL_robust.run_DAML \
+  --dataset cifar100 \
+  --model ResNet18 \
+  --classes-per-task 10 \
+  --epochs 30 \
+  --batch-size 128 \
+  --optimizer adam \
+  --lr 0.0005 \
+  --memory-budget 2000 \
+  --daml-alpha 0.2 \
+  --pgd-epsilon 0.031372549 \
+  --pgd-step-size 0.007843137 \
+  --pgd-steps 10 \
+  --eval-pgd-steps 10
+```
+
+result:
+![DAML clean average accuracy](cl_fcl_baseline/analyse/plot-CL-robust/runs/cl_robust_daml_20260725_225618/eval_average/clean_average_accuracy.png)
+![DAML robust average accuracy](cl_fcl_baseline/analyse/plot-CL-robust/runs/cl_robust_daml_20260725_225618/eval_average/robust_average_accuracy.png)
+![DAML clean task accuracy](cl_fcl_baseline/analyse/plot-CL-robust/runs/cl_robust_daml_20260725_225618/eval_compare/all_tasks_accuracy.png)
+![DAML robust task accuracy](cl_fcl_baseline/analyse/plot-CL-robust/runs/cl_robust_daml_20260725_225618/eval_compare/all_tasks_robust_accuracy.png)
+
+### **FLAIR**
+
+FLAIR combines adversarial distillation (ADSL) with a flatness-preserving distillation penalty (FPD).
+
+Method-specific options:
+- `--flair-alpha` ADSL distillation weight
+- `--flair-beta` FPD weight
+
+Example:
+```bash
+python -m cl_fcl_baseline.experiments.CL_robust.run_FLAIR \
+  --dataset cifar100 \
+  --model ResNet18 \
+  --classes-per-task 10 \
+  --epochs 30 \
+  --batch-size 32 \
+  --optimizer sgd \
+  --lr 0.1 \
+  --memory-budget 2000 \
+  --flair-alpha 1 \
+  --flair-beta 1 \
+  --pgd-epsilon 0.031372549 \
+  --pgd-step-size 0.007843137 \
+  --pgd-steps 10 \
+  --eval-pgd-steps 10
+```
+
+result:
+![FLAIR clean average accuracy](cl_fcl_baseline/analyse/plot-CL-robust/runs/cl_robust_flair_20260725_225621/eval_average/clean_average_accuracy.png)
+![FLAIR robust average accuracy](cl_fcl_baseline/analyse/plot-CL-robust/runs/cl_robust_flair_20260725_225621/eval_average/robust_average_accuracy.png)
+![FLAIR clean task accuracy](cl_fcl_baseline/analyse/plot-CL-robust/runs/cl_robust_flair_20260725_225621/eval_compare/all_tasks_accuracy.png)
+![FLAIR robust task accuracy](cl_fcl_baseline/analyse/plot-CL-robust/runs/cl_robust_flair_20260725_225621/eval_compare/all_tasks_robust_accuracy.png)
+
+### **TABA**
+
+TABA augments adversarial continual learning with task-aware interpolation between old-task boundary samples and new-task samples.
+
+Method-specific options:
+- `--taba-mix-batch-size` boundary-mix minibatch size; `0` matches the stream batch size
+- `--taba-lambda-min` and `--taba-lambda-max` bound the interpolation coefficient
+
+Example:
+```bash
+python -m cl_fcl_baseline.experiments.CL_robust.run_TABA \
+  --dataset cifar100 \
+  --model ResNet18 \
+  --num-tasks 10 \
+  --classes-per-task 10 \
+  --epochs 30 \
+  --batch-size 128 \
+  --optimizer sgd \
+  --lr 0.01 \
+  --weight-decay 0.00001 \
+  --memory-budget 2000 \
+  --taba-lambda-min 0.45 \
+  --taba-lambda-max 0.55 \
+  --pgd-epsilon 0.031372549 \
+  --pgd-step-size 0.007843137 \
+  --pgd-steps 7 \
+  --eval-pgd-steps 7
+```
+
+result:
+![TABA clean average accuracy](cl_fcl_baseline/analyse/plot-CL-robust/runs/cl_robust_taba_20260723_234553/eval_average/clean_average_accuracy.png)
+![TABA robust average accuracy](cl_fcl_baseline/analyse/plot-CL-robust/runs/cl_robust_taba_20260723_234553/eval_average/robust_average_accuracy.png)
+![TABA clean task accuracy](cl_fcl_baseline/analyse/plot-CL-robust/runs/cl_robust_taba_20260723_234553/eval_compare/all_tasks_accuracy.png)
+![TABA robust task accuracy](cl_fcl_baseline/analyse/plot-CL-robust/runs/cl_robust_taba_20260723_234553/eval_compare/all_tasks_robust_accuracy.png)
+
+**CL and CL+AT log analysis**
+
+Run both analysers from the repository root:
+```bash
+python cl_fcl_baseline/analyse/analyse-cl.py
+python cl_fcl_baseline/analyse/analyse-cl-robust.py
+```
+
+Their default inputs and outputs are:
+- `cl_fcl_baseline/experiments/CL/logs/*.jsonl` -> `cl_fcl_baseline/analyse/plot-CL/`
+- `cl_fcl_baseline/experiments/CL_robust/logs/*.jsonl` -> `cl_fcl_baseline/analyse/plot-CL-robust/`
+
+The remaining result families follow the same directory convention:
+- FCL results: `cl_fcl_baseline/analyse/plot-FCL/<method>/`
+- robust FCL results: `cl_fcl_baseline/analyse/plot-FCL-robust/<method>/`
+- robust FL results: `cl_fcl_baseline/analyse/plot-FL-robust/`
+
+Each run receives task-wise training curves, global continual-evaluation curves, historical-task comparison curves, and a `summary.json`. CL+AT additionally plots clean/robust averages, per-task robust accuracy/loss, and AFLC-RAER replay-memory records. `compare_latest/` compares the newest log for each algorithm on a normalized task-progress axis, so runs with different epoch counts remain aligned.
+
+Custom directories can be selected without editing the scripts:
+```bash
+python cl_fcl_baseline/analyse/analyse-cl.py \
+  --log-dir path/to/cl/logs \
+  --output-dir path/to/cl/plots
+
+python cl_fcl_baseline/analyse/analyse-cl-robust.py \
+  --log-dir path/to/cl_at/logs \
+  --output-dir path/to/cl_at/plots
+```
 
 **FedAvg usage notes**
 
@@ -1029,7 +1359,7 @@ result:
 
 **Logs**
 
-Training and evaluation logs are written to `cl_fcl_baseline/experiments/logs/` as JSONL files when `--log-file` is not provided. Each line is a JSON record with `type=train|eval`, `round`, and `metrics`.
+Training and evaluation logs are JSONL files. FL/FCL runners use `cl_fcl_baseline/experiments/logs/`, standalone CL runners use `cl_fcl_baseline/experiments/CL/logs/`, CL+AT runners use `cl_fcl_baseline/experiments/CL_robust/logs/`, and standalone robust FL runners use `cl_fcl_baseline/experiments/FL_robust/logs/`. The record schema follows the experiment family: FL/FCL records use rounds, while CL and CL+AT records use task indices and epochs.
 
 **Philosophy**
 

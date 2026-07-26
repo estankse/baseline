@@ -3,6 +3,9 @@ import os
 import re
 from collections import defaultdict
 
+import matplotlib
+
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 
@@ -154,7 +157,7 @@ def plot_global_avg_metric(series, xticks, xtick_labels, title, ylabel, save_pat
     plt.close()
 
 
-def plots_fcl_robust(log_text, output_dir="plot-FCL-FL_robust"):
+def plots_fcl_robust(log_text, output_dir="plot-FCL-robust/FedWeIT-PGD"):
     ensure_dir(output_dir)
 
     train_dir = os.path.join(output_dir, "train")
@@ -379,4 +382,4 @@ def plots_fcl_robust(log_text, output_dir="plot-FCL-FL_robust"):
 if __name__ == "__main__":
     log_path = "../experiments/logs/fedweit_sylva_20260425_123533.jsonl"
     with open(log_path, "r", encoding="utf-8") as f:
-        plots_fcl_robust(f.read(), output_dir="plot-FedWeIT-Sylva")
+        plots_fcl_robust(f.read(), output_dir="plot-FCL-robust/FedWeIT-Sylva")

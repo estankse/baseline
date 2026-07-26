@@ -34,13 +34,18 @@ def build_torchvision_dataset(
         ) from exc
 
     if key == "mnist":
-        transform = transforms.Compose([
+        eval_transform = transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize((0.1307,), (0.3081,)),  # MNIST official mean/std.
         ])
+        transform = eval_transform
     elif key == "cifar10":
         mean = (0.4914, 0.4822, 0.4465)
         std = (0.2023, 0.1994, 0.2010)
+        eval_transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize(mean, std),
+        ])
         if train:
             transform = transforms.Compose([
                 transforms.RandomCrop(32, padding=4),
@@ -49,13 +54,14 @@ def build_torchvision_dataset(
                 transforms.Normalize(mean, std),
             ])
         else:
-            transform = transforms.Compose([
-                transforms.ToTensor(),
-                transforms.Normalize(mean, std),
-            ])
+            transform = eval_transform
     elif key == "cifar100":
         mean = (0.5071, 0.4867, 0.4408)
         std = (0.2675, 0.2565, 0.2761)
+        eval_transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize(mean, std),
+        ])
         if train:
             transform = transforms.Compose([
                 transforms.RandomCrop(32, padding=4),
@@ -64,10 +70,7 @@ def build_torchvision_dataset(
                 transforms.Normalize(mean, std),
             ])
         else:
-            transform = transforms.Compose([
-                transforms.ToTensor(),
-                transforms.Normalize(mean, std),
-            ])
+            transform = eval_transform
     else:
         raise ValueError(f"Unsupported torchvision dataset: {name}")
 
@@ -80,6 +83,10 @@ def build_torchvision_dataset(
         dataset = datasets.CIFAR100(root=str(root), train=train, download=True, transform=transform)
     else:
         raise ValueError(f"Unsupported torchvision dataset: {name}")
+
+    # iCaRL stores raw exemplar images. Replay uses the training transform,
+    # while herding/NME use this deterministic view of the same image.
+    setattr(dataset, "_cl_eval_transform", eval_transform)
 
     if num_samples is None or num_samples <= 0 or num_samples >= len(dataset):
         return dataset

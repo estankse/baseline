@@ -1,0 +1,36 @@
+{
+  "log_file": "E:\\cc\\Keras\\github\\CL-FCL\\cl_fcl_baseline\\experiments\\robust\\logs\\sfat_20260507_133037.jsonl",
+  "method": "sfat",
+  "num_train_records": 31,
+  "num_eval_records": 31,
+  "final_eval": {
+    "accuracy": 0.4669,
+    "loss": 2.2649399528503418,
+    "robust_accuracy": 0.1577,
+    "robust_loss": 4.941992268371582,
+    "num_pgd_batches": 79.0,
+    "num_pgd_samples": 10000.0
+  },
+  "best_eval": {
+    "accuracy": 0.4669,
+    "loss": 2.2245259056091307,
+    "robust_accuracy": 0.1581,
+    "robust_loss": 3.9978267391204834
+  },
+  "pgd_config": {
+    "epsilon": 0.03137254901960784,
+    "step_size": 0.00784313725490196,
+    "steps": 10,
+    "random_start": true,
+    "normalized_space": false,
+    "max_batches": 0
+  },
+  "method_config": {
+    "adversarial_ratio": 0.5,
+    "warmup_rounds": 0,
+    "warmup_adversarial_ratio": 0.1,
+    "alpha": 0.09090909090909091,
+    "enhanced_clients": 1,
+    "loss_metric": "adv_ce_loss"
+  }
+}

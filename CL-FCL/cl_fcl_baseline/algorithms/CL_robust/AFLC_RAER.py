@@ -7,12 +7,12 @@ from typing import Callable, Dict, List, Sequence
 
 import torch
 import torch.nn.functional as F
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
 
 from ...contracts import MetricDict, TaskDefinition
 from ...trainers.utils import move_to_device
 from ..CL.base import last_linear_module
-from ..CL.iCaRL import Exemplar
+from ..CL.iCaRL import Exemplar, _stored_exemplar
 from .base import RobustReplayLearner
 
 
@@ -31,8 +31,11 @@ class AFLCRAERLearner(RobustReplayLearner):
     future_prior: bool = True
     adaptive_eval_attack: bool = False
     class_counts: Dict[int, int] = field(default_factory=dict, init=False)
-    _raer_candidates: Dict[int, List[tuple[Exemplar, int]]] = field(
+    _raer_candidates: Dict[int, List[tuple[Exemplar | int, int]]] = field(
         default_factory=dict, init=False, repr=False
+    )
+    _raer_source_dataset: Dataset | None = field(
+        default=None, init=False, repr=False
     )
 
     def __post_init__(self) -> None:
@@ -81,6 +84,23 @@ class AFLCRAERLearner(RobustReplayLearner):
         )
         return logits - values.unsqueeze(0)
 
+    def calibration_margin(self) -> float:
+        """Return the mean paper margin ``v_p - v_c`` for diagnostics."""
+
+        if not self.old_classes or not self.new_classes:
+            return 0.0
+        class_ids = [*self.old_classes, *self.new_classes]
+        values = self._calibration_values(
+            class_ids, device=torch.device("cpu"), dtype=torch.float64
+        )
+        old_count = len(self.old_classes)
+        return float(
+            (
+                values[:old_count].mean()
+                - values[old_count:].mean()
+            ).item()
+        )
+
     def evaluation_attack_calibrator(
         self, class_ids: Sequence[int]
     ) -> Callable[[torch.Tensor], torch.Tensor] | None:
@@ -99,9 +119,28 @@ class AFLCRAERLearner(RobustReplayLearner):
                 current_counts[target] += 1
         self.class_counts.update(current_counts)
 
-    def observe(self, inputs: torch.Tensor, targets: torch.Tensor, task_id: str) -> MetricDict:
+    def observe(
+        self,
+        inputs: torch.Tensor,
+        targets: torch.Tensor,
+        task_id: str,
+        *,
+        source_indices: Sequence[int] | torch.Tensor | None = None,
+        source_dataset: Dataset | None = None,
+    ) -> MetricDict:
         del task_id
         stream_count = int(targets.shape[0])
+        if source_indices is not None and len(source_indices) != stream_count:
+            raise ValueError("source_indices must identify every stream sample.")
+        if source_indices is not None and source_dataset is None:
+            raise ValueError("source_dataset is required when source_indices are provided.")
+        if source_indices is not None:
+            if (
+                self._raer_source_dataset is not None
+                and self._raer_source_dataset is not source_dataset
+            ):
+                raise ValueError("RAER source dataset changed within one task.")
+            self._raer_source_dataset = source_dataset
         replay = self.sample_memory(self.replay_count(stream_count))
         if replay is not None:
             memory_inputs, memory_targets, _indices = replay
@@ -119,15 +158,22 @@ class AFLCRAERLearner(RobustReplayLearner):
         )
         for index in range(stream_count):
             class_id = int(labels[index].item())
-            exemplar: Exemplar = (
-                clean[index].detach().cpu().clone(),
-                class_id,
-            )
+            if source_indices is None:
+                candidate: Exemplar | int = (
+                    clean[index].detach().cpu().clone(),
+                    class_id,
+                )
+            else:
+                # Materializing every raw image here puts costly PIL copies in
+                # the PGD training hot path.  Keep only the dataset-local index
+                # and restore raw samples after RAER has selected the winners.
+                candidate = int(source_indices[index])
             self._raer_candidates.setdefault(class_id, []).append(
-                (exemplar, int(difficulty[index].item()))
+                (candidate, int(difficulty[index].item()))
             )
 
-        calibrated = self.calibrate_logits(self.model(adversarial))
+        raw_logits = self.model(adversarial)
+        calibrated = self.calibrate_logits(raw_logits)
         current_loss = F.cross_entropy(calibrated[:stream_count], labels[:stream_count])
         memory_loss = current_loss.new_zeros(())
         if labels.shape[0] > stream_count:
@@ -144,6 +190,7 @@ class AFLCRAERLearner(RobustReplayLearner):
             "raer_acceptance": float(
                 difficulty[:stream_count].lt(int(self.raer_threshold)).float().mean().item()
             ),
+            "calibration_margin": self.calibration_margin(),
         }
 
     def train_epoch(self, dataloader: DataLoader, task_id: str) -> MetricDict:
@@ -153,7 +200,14 @@ class AFLCRAERLearner(RobustReplayLearner):
         for batch in dataloader:
             inputs = move_to_device(batch[0], self.device)
             targets = move_to_device(batch[1], self.device).long()
-            metrics = self.observe(inputs, targets, task_id)
+            source_indices = batch[2] if len(batch) > 2 else None
+            metrics = self.observe(
+                inputs,
+                targets,
+                task_id,
+                source_indices=source_indices,
+                source_dataset=dataloader.dataset if source_indices is not None else None,
+            )
             batch_size = int(targets.shape[0])
             total_examples += batch_size
             for name, value in metrics.items():
@@ -170,6 +224,7 @@ class AFLCRAERLearner(RobustReplayLearner):
         epoch_callback: Callable[[MetricDict], None] | None = None,
     ) -> List[MetricDict]:
         self._refresh_class_counts(dataloader)
+        self._raer_source_dataset = None
         history: List[MetricDict] = []
         for epoch in range(int(epochs)):
             # The final epoch's K values give one score per stream visit and
@@ -194,14 +249,32 @@ class AFLCRAERLearner(RobustReplayLearner):
             self.exemplar_sets[class_id] = random.sample(old, min(per_class, len(old)))
         for class_id in self.new_classes:
             scored = self._raer_candidates.get(class_id, [])
-            eligible = [
-                exemplar
-                for exemplar, difficulty in scored
+            eligible: List[Exemplar | int] = [
+                candidate
+                for candidate, difficulty in scored
                 if difficulty < int(self.raer_threshold)
             ]
-            self.exemplar_sets[class_id] = random.sample(
+            selected = random.sample(
                 eligible, min(per_class, len(eligible))
             )
+            exemplars: List[Exemplar] = []
+            for candidate in selected:
+                if isinstance(candidate, int):
+                    if self._raer_source_dataset is None:
+                        raise RuntimeError(
+                            "RAER cannot restore indexed candidates without their dataset."
+                        )
+                    exemplar = _stored_exemplar(
+                        self._raer_source_dataset, candidate
+                    )
+                else:
+                    exemplar = candidate
+                if int(exemplar[1]) != int(class_id):
+                    raise ValueError(
+                        "Stored RAER exemplar label does not match its candidate class."
+                    )
+                exemplars.append(exemplar)
+            self.exemplar_sets[class_id] = exemplars
         for class_id in self.seen_classes:
             self.class_counts[class_id] = len(self.exemplar_sets.get(class_id, []))
 
