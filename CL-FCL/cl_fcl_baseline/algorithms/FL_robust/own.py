@@ -781,15 +781,19 @@ class FedWeITOwnServer(FedWeITServer):
         ]
 
         for client in selected_clients:
-            received_key = (client.client_id, task_id)
+            client_task_id = self.task_id_for_client(client.client_id, task_id)
+            received_key = (client.client_id, client_task_id)
             metadata: dict[str, object] = {}
             if received_key not in self._clients_that_received_kb:
-                metadata["knowledge_base"] = self.sampled_task_kb.get(task_id, [])
+                metadata["knowledge_base"] = self.sampled_client_task_kb.get(
+                    received_key,
+                    self.sampled_task_kb.get(client_task_id, []),
+                )
                 self._clients_that_received_kb.add(received_key)
             context = ClientContext(
                 client_id=client.client_id,
                 round_idx=round_idx,
-                task_id=task_id,
+                task_id=client_task_id,
                 metadata=metadata,
             )
             result = client.fit(global_state, context)
@@ -797,9 +801,10 @@ class FedWeITOwnServer(FedWeITServer):
 
             adaptive_state = result.payload.get("adaptive_state", {})
             if isinstance(adaptive_state, Mapping) and adaptive_state:
-                self.task_adaptive_buffer.setdefault(task_id, {})[client.client_id] = FedWeITKnowledge(
+                task_buffer = self.task_adaptive_buffer.setdefault(client_task_id, {})
+                task_buffer[client.client_id] = FedWeITKnowledge(
                     client_id=client.client_id,
-                    task_id=task_id,
+                    task_id=client_task_id,
                     adaptive_state=detach_state_dict(dict(adaptive_state)),
                 )
 
@@ -813,9 +818,10 @@ class FedWeITOwnServer(FedWeITServer):
         defended_clients = 0
         updated_global_state = self.get_global_state()
         for client in selected_clients:
+            client_task_id = self.task_id_for_client(client.client_id, task_id)
             defense_metrics = client.run_defense(
                 global_state=updated_global_state,
-                task_id=task_id,
+                task_id=client_task_id,
                 uap_pool=self._personalized_uap_pool(client.client_id),
             )
             if defense_metrics:
@@ -835,8 +841,18 @@ class FedWeITOwnServer(FedWeITServer):
         metadata = dict(aggregation_result.metadata)
         metadata["round_idx"] = round_idx
         metadata["task_id"] = task_id
+        metadata["client_task_ids"] = dict(self.client_task_ids)
         metadata["knowledge_base_size"] = float(len(self.knowledge_base))
-        metadata["sampled_kb_size"] = float(len(self.sampled_task_kb.get(task_id, [])))
+        sampled_sizes = [
+            len(
+                self.sampled_client_task_kb.get(
+                    (client.client_id, self.task_id_for_client(client.client_id, task_id)),
+                    [],
+                )
+            )
+            for client in selected_clients
+        ]
+        metadata["sampled_kb_size"] = float(max(sampled_sizes, default=0))
         metadata["uap_topk"] = float(self.uap_topk)
         return AggregationResult(
             global_state=aggregation_result.global_state,

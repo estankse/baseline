@@ -18,7 +18,7 @@ def _add_common_fl_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--num-clients", type=int, default=10)
     parser.add_argument("--client-sample-ratio", type=float, default=0.6, help="fraction of clients sampled each round (0, 1].")
-    parser.add_argument("--device", type=str, default="auto", help="cpu | cuda | cuda:0 | auto")
+    parser.add_argument("--device", type=str, default="auto", help="cpu | cuda | cuda:0 | cuda:1 | auto")
     parser.add_argument("--partition", type=str, default="noniid", choices=["iid", "noniid"])
     parser.add_argument("--noniid-method", type=str, default="dirichlet", choices=["shards", "dirichlet"], help="noniid partitioning strategy when --partition noniid is selected.",)
     parser.add_argument("--noniid-shards", type=int, default=2)
@@ -489,6 +489,26 @@ def _add_common_fcl_args() -> argparse.ArgumentParser:
     parser.add_argument("--num-rounds", type=int, default=100)
     parser.add_argument("--num-tasks", type=int, default=0)
     parser.add_argument("--task-order-shuffle", action="store_true", default=False)
+    parser.add_argument(
+        "--heterogeneous-task-order",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "give every client an independently shuffled task stream; "
+            "disabled by default so all clients follow the shared task order"
+        ),
+    )
+    parser.add_argument(
+        "--heterogeneous-eval-mode",
+        type=str,
+        default="position",
+        choices=["position", "task"],
+        help=(
+            "evaluation grouping used only with --heterogeneous-task-order: "
+            "position averages each client's task at the same arrival position "
+            "(the 0718 protocol), while task groups by the actual task ID"
+        ),
+    )
     parser.add_argument("--classes-per-task", type=int, default=10)
     parser.add_argument("--rounds-per-task", type=int, default=10)
     parser.add_argument("--local_epochs", type=int, default=10)

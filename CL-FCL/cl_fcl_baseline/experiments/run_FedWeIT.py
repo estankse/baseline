@@ -210,38 +210,39 @@ def main() -> None:
     else:
         Path(log_path).parent.mkdir(parents=True, exist_ok=True)
 
-    task_order = [task.task_id for task in tasks]
-
     def _eval_round(task_id: str, round_idx: int) -> None:
-        seen_task_ids = task_order[: task_order.index(task_id) + 1]
+        evaluation_groups = experiment.evaluation_task_groups
         task_metrics: dict[str, dict[str, float]] = {}
         avg_accuracy = 0.0
         avg_loss = 0.0
-        for seen_task_id in seen_task_ids:
-            task_loader = test_loaders[seen_task_id]
+        for eval_task_id, client_task_ids in evaluation_groups:
             evaluated_clients = 0
+            client_eval_samples = 0
             client_accuracy = 0.0
             client_loss = 0.0
-            for client_idx, client in enumerate(server.clients):
-                if seen_task_id not in client.mask_logits:
+            for client in server.clients:
+                client_task_id = client_task_ids.get(client.client_id)
+                if client_task_id is None or client_task_id not in client.mask_logits:
                     continue
-                eval_state = server.build_eval_state(seen_task_id, client_id=client.client_id)
+                task_loader = test_loaders[client_task_id]
+                eval_state = server.build_eval_state(client_task_id, client_id=client.client_id)
                 eval_trainer.model.load_state_dict(eval_state, strict=True)
                 local_metrics = eval_trainer.evaluate(task_loader)
                 evaluated_clients += 1
+                client_eval_samples += len(task_loader.dataset)
                 client_accuracy += float(local_metrics.get("accuracy", 0.0))
                 client_loss += float(local_metrics.get("loss", 0.0))
             metrics = {
                 "accuracy": client_accuracy / max(1, evaluated_clients),
                 "loss": client_loss / max(1, evaluated_clients),
                 "num_eval_clients": float(evaluated_clients),
-                "num_eval_samples": float(len(task_loader.dataset)),
+                "num_eval_samples": float(client_eval_samples / max(1, evaluated_clients)),
             }
-            task_metrics[seen_task_id] = metrics
+            task_metrics[eval_task_id] = metrics
             avg_accuracy += float(metrics.get("accuracy", 0.0))
             avg_loss += float(metrics.get("loss", 0.0))
-        avg_accuracy /= max(1, len(seen_task_ids))
-        avg_loss /= max(1, len(seen_task_ids))
+        avg_accuracy /= max(1, len(evaluation_groups))
+        avg_loss /= max(1, len(evaluation_groups))
         per_task_accuracy = " ".join(
             f"{seen_task_id}={metrics.get('accuracy', 0.0):.4f}"
             for seen_task_id, metrics in task_metrics.items()
@@ -253,6 +254,11 @@ def main() -> None:
             "round": round_idx,
             "avg_metrics": {"accuracy": avg_accuracy, "loss": avg_loss},
             "task_metrics": task_metrics,
+            "heterogeneous_eval_mode": experiment.effective_eval_mode,
+            "evaluation_task_groups": {
+                eval_task_id: client_task_ids
+                for eval_task_id, client_task_ids in evaluation_groups
+            },
         }
         with open(log_path, "a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
@@ -262,6 +268,9 @@ def main() -> None:
         strategy=NaiveContinualStrategy(),
         tasks=tasks,
         rounds_per_task=args.rounds_per_task,
+        heterogeneous_task_order=args.heterogeneous_task_order,
+        heterogeneous_eval_mode=args.heterogeneous_eval_mode,
+        seed=args.seed,
         log_each_round=True,
         eval_every=args.eval_every,
         eval_fn=_eval_round if args.eval_every and args.eval_every > 0 else None,

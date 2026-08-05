@@ -869,6 +869,7 @@ class FedKNOWServer:
     clients: Sequence[FedKNOWClient]
     aggregator: FedAvgAggregator = field(default_factory=FedAvgAggregator)
     client_sample_ratio: float = 1.0
+    client_task_ids: Dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not (0.0 < float(self.client_sample_ratio) <= 1.0):
@@ -891,13 +892,34 @@ class FedKNOWServer:
             clients = random.sample(clients, k=num_selected)
         return clients
 
+    def set_client_task_ids(self, client_task_ids: Mapping[str, str]) -> None:
+        self.client_task_ids = {
+            str(client_id): str(task_id)
+            for client_id, task_id in client_task_ids.items()
+        }
+
+    def task_id_for_client(self, client_id: str, default_task_id: str) -> str:
+        return self.client_task_ids.get(client_id, default_task_id)
+
     def on_task_start(self, task: TaskDefinition) -> None:
         for client in self.clients:
             client.on_task_start(task.task_id)
 
+    def on_client_tasks_start(self, client_tasks: Mapping[str, TaskDefinition]) -> None:
+        for client in self.clients:
+            task = client_tasks.get(client.client_id)
+            if task is not None:
+                client.on_task_start(task.task_id)
+
     def on_task_end(self, task: TaskDefinition) -> None:
         for client in self.clients:
             client.extract_task_knowledge(task.task_id)
+
+    def on_client_tasks_end(self, client_tasks: Mapping[str, TaskDefinition]) -> None:
+        for client in self.clients:
+            task = client_tasks.get(client.client_id)
+            if task is not None:
+                client.extract_task_knowledge(task.task_id)
 
     def run_round(self, round_idx: int, task_id: str) -> AggregationResult:
         global_state = self.get_global_state()
@@ -906,7 +928,12 @@ class FedKNOWServer:
         before_states: Dict[str, StateDict] = {}
 
         for client in selected_clients:
-            context = ClientContext(client_id=client.client_id, round_idx=round_idx, task_id=task_id)
+            client_task_id = self.task_id_for_client(client.client_id, task_id)
+            context = ClientContext(
+                client_id=client.client_id,
+                round_idx=round_idx,
+                task_id=client_task_id,
+            )
             result = client.fit(global_state, context)
             client_results.append(result)
             before_state = result.payload.get("before_aggregation_state", {})
@@ -924,7 +951,12 @@ class FedKNOWServer:
             before_state = before_states.get(client.client_id)
             if before_state is None:
                 continue
-            post_metrics = client.post_aggregation_finetune(task_id, before_state, updated_global_state)
+            client_task_id = self.task_id_for_client(client.client_id, task_id)
+            post_metrics = client.post_aggregation_finetune(
+                client_task_id,
+                before_state,
+                updated_global_state,
+            )
             for name, value in post_metrics.items():
                 post_metric_sums[name] = post_metric_sums.get(name, 0.0) + float(value)
                 post_metric_counts[name] = post_metric_counts.get(name, 0.0) + 1.0
@@ -938,13 +970,18 @@ class FedKNOWServer:
         metadata["aggregator"] = "fedknow"
         metadata["round_idx"] = round_idx
         metadata["task_id"] = task_id
+        metadata["client_task_ids"] = dict(self.client_task_ids)
         return AggregationResult(
             global_state=aggregation_result.global_state,
             metrics=metrics,
             metadata=metadata,
         )
 
-    def build_eval_state(self, task_id: str, client_id: str | None = None) -> Dict[str, torch.Tensor]:
+    def build_eval_state(
+        self,
+        task_id: str,
+        client_id: str | None = None,
+    ) -> Dict[str, torch.Tensor]:
         global_state = self.get_global_state()
         if client_id is not None:
             for client in self.clients:

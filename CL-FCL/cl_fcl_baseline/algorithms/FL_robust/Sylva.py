@@ -1092,3 +1092,14 @@ class FedWeITSylvaServer(FedWeITServer):
             refine_benign = getattr(client, "refine_benign", None)
             if callable(refine_benign):
                 refine_benign(global_state, task.task_id)
+
+    def on_client_tasks_end(self, client_tasks: Mapping[str, TaskDefinition]) -> None:
+        super().on_client_tasks_end(client_tasks)
+        global_state = self.get_global_state()
+        for client in self.clients:
+            task = client_tasks.get(client.client_id)
+            if task is None:
+                continue
+            refine_benign = getattr(client, "refine_benign", None)
+            if callable(refine_benign):
+                refine_benign(global_state, task.task_id)

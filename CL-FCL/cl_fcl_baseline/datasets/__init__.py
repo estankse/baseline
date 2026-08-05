@@ -1,5 +1,6 @@
 from .build import (
     ClassIncrementalSubset,
+    IndexedDataset,
     PermutedPixelsDataset,
     RandomClassificationDataset,
     build_class_incremental_tasks,
@@ -12,6 +13,7 @@ from .torchvision_datasets import build_torchvision_dataset, dataset_info
 
 __all__ = [
     "ClassIncrementalSubset",
+    "IndexedDataset",
     "PermutedPixelsDataset",
     "RandomClassificationDataset",
     "build_class_incremental_tasks",

@@ -992,11 +992,16 @@ class FedWeITRBNServer(FedWeITServer):
     src_weight_mode: str = "cos"
     propagate_before_training: bool = True
 
-    def _propagate_task_bn(self, task_id: str) -> None:
+    def _propagate_task_bn(
+        self,
+        task_id: str,
+        clients: Sequence[FedWeITClient] | None = None,
+    ) -> None:
         global_state = self.get_global_state()
+        task_clients = list(self.clients if clients is None else clients)
         at_clients = [
             client
-            for client in self.clients
+            for client in task_clients
             if isinstance(client, FedWeITRBNClient) and client.is_at_client
         ]
         source_states = [
@@ -1004,7 +1009,7 @@ class FedWeITRBNServer(FedWeITServer):
             for client in at_clients
             if task_id in client.task_local_bn_buffers
         ]
-        for client in self.clients:
+        for client in task_clients:
             if not isinstance(client, FedWeITRBNClient):
                 continue
             client.prepare_local_bn(global_state, task_id)
@@ -1014,5 +1019,10 @@ class FedWeITRBNServer(FedWeITServer):
 
     def run_round(self, round_idx: int, task_id: str) -> AggregationResult:
         if self.propagate_before_training:
-            self._propagate_task_bn(task_id)
+            clients_by_task: Dict[str, List[FedWeITClient]] = defaultdict(list)
+            for client in self.clients:
+                client_task_id = self.task_id_for_client(client.client_id, task_id)
+                clients_by_task[client_task_id].append(client)
+            for client_task_id, task_clients in clients_by_task.items():
+                self._propagate_task_bn(client_task_id, task_clients)
         return super().run_round(round_idx, task_id)

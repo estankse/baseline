@@ -660,8 +660,11 @@ class FedWeITServer:
     kb_sample_size: int = 0
     knowledge_base: List[FedWeITKnowledge] = field(default_factory=list)
     sampled_task_kb: Dict[str, List[FedWeITKnowledge]] = field(default_factory=dict)
+    sampled_client_task_kb: Dict[tuple[str, str], List[FedWeITKnowledge]] = field(default_factory=dict)
     task_adaptive_buffer: Dict[str, Dict[str, FedWeITKnowledge]] = field(default_factory=dict)
     _clients_that_received_kb: set[tuple[str, str]] = field(default_factory=set)
+    _completed_client_tasks: set[tuple[str, str]] = field(default_factory=set)
+    client_task_ids: Dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not (0.0 < float(self.client_sample_ratio) <= 1.0):
@@ -681,9 +684,39 @@ class FedWeITServer:
                 k=int(self.kb_sample_size),
             )
 
+    def set_client_task_ids(self, client_task_ids: Mapping[str, str]) -> None:
+        self.client_task_ids = {
+            str(client_id): str(task_id)
+            for client_id, task_id in client_task_ids.items()
+        }
+
+    def task_id_for_client(self, client_id: str, default_task_id: str) -> str:
+        return self.client_task_ids.get(client_id, default_task_id)
+
+    def on_client_tasks_start(self, client_tasks: Mapping[str, TaskDefinition]) -> None:
+        tasks_by_id = {task.task_id: task for task in client_tasks.values()}
+        for task in tasks_by_id.values():
+            self.on_task_start(task)
+        for client_id, task in client_tasks.items():
+            self.sampled_client_task_kb[(client_id, task.task_id)] = list(
+                self.sampled_task_kb.get(task.task_id, [])
+            )
+
     def on_task_end(self, task: TaskDefinition) -> None:
         # Algorithm 1, line 11: kb <- kb union {A_j^(t)} for all clients.
         self.knowledge_base.extend(self.task_adaptive_buffer.get(task.task_id, {}).values())
+
+    def on_client_tasks_end(self, client_tasks: Mapping[str, TaskDefinition]) -> None:
+        # In a heterogeneous stream, clients finish different task IDs at the
+        # same task position. Add each client/task contribution exactly once.
+        for client_id, task in client_tasks.items():
+            completed_key = (client_id, task.task_id)
+            if completed_key in self._completed_client_tasks:
+                continue
+            knowledge = self.task_adaptive_buffer.get(task.task_id, {}).get(client_id)
+            if knowledge is not None:
+                self.knowledge_base.append(knowledge)
+            self._completed_client_tasks.add(completed_key)
 
     def get_global_state(self) -> Dict[str, torch.Tensor]:
         return detach_state_dict(self.model.state_dict())
@@ -707,15 +740,19 @@ class FedWeITServer:
         client_results: List[TrainResult] = []
 
         for client in self._select_clients():
-            received_key = (client.client_id, task_id)
+            client_task_id = self.task_id_for_client(client.client_id, task_id)
+            received_key = (client.client_id, client_task_id)
             metadata: dict[str, object] = {}
             if received_key not in self._clients_that_received_kb:
-                metadata["knowledge_base"] = self.sampled_task_kb.get(task_id, [])
+                metadata["knowledge_base"] = self.sampled_client_task_kb.get(
+                    received_key,
+                    self.sampled_task_kb.get(client_task_id, []),
+                )
                 self._clients_that_received_kb.add(received_key)
             context = ClientContext(
                 client_id=client.client_id,
                 round_idx=round_idx,
-                task_id=task_id,
+                task_id=client_task_id,
                 metadata=metadata,
             )
             result = client.fit(global_state, context)
@@ -723,9 +760,10 @@ class FedWeITServer:
 
             adaptive_state = result.payload.get("adaptive_state", {})
             if isinstance(adaptive_state, Mapping) and adaptive_state:
-                self.task_adaptive_buffer.setdefault(task_id, {})[client.client_id] = FedWeITKnowledge(
+                task_buffer = self.task_adaptive_buffer.setdefault(client_task_id, {})
+                task_buffer[client.client_id] = FedWeITKnowledge(
                     client_id=client.client_id,
-                    task_id=task_id,
+                    task_id=client_task_id,
                     adaptive_state=detach_state_dict(dict(adaptive_state)),
                 )
 
@@ -736,15 +774,29 @@ class FedWeITServer:
         metadata = dict(aggregation_result.metadata)
         metadata["round_idx"] = round_idx
         metadata["task_id"] = task_id
+        metadata["client_task_ids"] = dict(self.client_task_ids)
         metadata["knowledge_base_size"] = float(len(self.knowledge_base))
-        metadata["sampled_kb_size"] = float(len(self.sampled_task_kb.get(task_id, [])))
+        sampled_sizes = [
+            len(
+                self.sampled_client_task_kb.get(
+                    (client.client_id, self.task_id_for_client(client.client_id, task_id)),
+                    [],
+                )
+            )
+            for client in self.clients
+        ]
+        metadata["sampled_kb_size"] = float(max(sampled_sizes, default=0))
         return AggregationResult(
             global_state=aggregation_result.global_state,
             metrics=dict(aggregation_result.metrics),
             metadata=metadata,
         )
 
-    def build_eval_state(self, task_id: str, client_id: str | None = None) -> Dict[str, torch.Tensor]:
+    def build_eval_state(
+        self,
+        task_id: str,
+        client_id: str | None = None,
+    ) -> Dict[str, torch.Tensor]:
         if client_id is not None:
             for client in self.clients:
                 if client.client_id == client_id:

@@ -423,6 +423,8 @@ Common options:
 - `--dataset` `random_classification` | `mnist` | `cifar10` | `cifar100`
 - `--num-tasks` number of continual tasks
 - `--classes-per-task` class split size for class-incremental datasets
+- `--heterogeneous-task-order` independently shuffles the task sequence of every client using `--seed`; by default all clients use the shared order
+- `--heterogeneous-eval-mode` controls heterogeneous-stream evaluation: `position` (default) averages each client's task at the same arrival position, while `task` groups clients by the actual task ID; ignored unless `--heterogeneous-task-order` is enabled
 - `--rounds-per-task` communication rounds per task
 - `--local_epochs` local epochs per round
 - `--lambda1` FedWeIT `lambda_l1` coefficient for adaptive parameters `A`

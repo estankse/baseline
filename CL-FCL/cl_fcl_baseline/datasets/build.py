@@ -88,6 +88,28 @@ class ClassIncrementalSubset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
         return sample, torch.tensor(target_value, dtype=torch.long)
 
 
+class IndexedDataset(Dataset):
+    """Return a dataset-local index alongside each sample.
+
+    Continual replay methods can use the index to store the original sample
+    instead of the already augmented tensor produced by ``__getitem__``.
+    Keeping ``dataset`` and ``indices`` public also lets the shared exemplar
+    storage helper unwrap this adapter like a regular subset.
+    """
+
+    def __init__(self, dataset: Dataset) -> None:
+        self.dataset = dataset
+        self.indices = list(range(len(dataset)))
+        self.remap_labels = False
+
+    def __len__(self) -> int:
+        return len(self.dataset)
+
+    def __getitem__(self, index: int):
+        sample, target = self.dataset[int(index)][:2]
+        return sample, target, int(index)
+
+
 def build_dataloader(
     dataset: Dataset,
     batch_size: int = 32,

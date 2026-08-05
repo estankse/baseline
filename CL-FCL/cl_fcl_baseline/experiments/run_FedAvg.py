@@ -28,6 +28,7 @@ except ImportError:  # pragma: no cover
 
 
 def main() -> None:
+    print(torch.cuda.is_available())
     global netmodel
     args = parse_fedavg_args()
     set_seed(args.seed)
