@@ -1,6 +1,6 @@
 ﻿# CL-FCL Baseline
 
-A compact, explicit PyTorch baseline for **Continual Learning (CL)**, **Adversarial Continual Learning (CL+AT)**, **Federated Learning (FL)**, and **Federated Continual Learning (FCL)**, plus implementations of **FedKEMF**, **FedAvg**, **FedProx**, **Scaffold**, **MOON**, and **FedWeIT**.
+A compact, explicit PyTorch baseline for **Continual Learning (CL)**, **Adversarial Continual Learning (CL+AT)**, **Federated Learning (FL)**, and **Federated Continual Learning (FCL)**, plus paper-oriented implementations of the repository's federated baselines.
 
 The code intentionally avoids:
 - registries
@@ -18,6 +18,9 @@ Federated Learning (FL)
 Federated Continual Learning (FCL)
 - `NaiveContinualStrategy`
 - `ContinualClient`, `FCLServer`, `FCLExperiment`
+- FedWeIT, FedKNOW, Loci, FedProTIP, FedViT, FedMGP, MultiFCL, MoAFCL, Powder, and Fed-Duet
+- unified runners under `cl_fcl_baseline/experiments/FCL/`
+- method notes under `cl_fcl_baseline/algorithms/FCL/README.md`
 
 Standalone Continual Learning (CL)
 - EWC, GEM, Learning without Forgetting (LwF), and iCaRL
@@ -38,13 +41,20 @@ FedKEMF (knowledge distillation + multi-model fusion)
 FedWeIT Federated Continual Learning
 - `FedWeITClient`
 - `FedWeITServer`
-- `run_FedWeIT.py`
+- `FCL/run_FedWeIT.py`
 - `FCL_robust/run_FedWeIT_PGD.py` adds PGD robust evaluation to FedWeIT
 - `FCL_robust/run_FedWeIT_FAT.py` combines FedWeIT with local Federated Adversarial Training
 - `FCL_robust/run_FedWeIT_SFAT.py` combines FedWeIT with Slack Federated Adversarial Training
 - `FCL_robust/run_FedWeIT_CalFAT.py` combines FedWeIT with Calibrated Federated Adversarial Training
 - `FCL_robust/run_FedWeIT_RBN.py` combines FedWeIT with FedRBN-style local BatchNorm personalization
 - `FCL_robust/run_FedWeIT_Sylva.py` combines FedWeIT with Sylva-inspired personalized adversarial fine-tuning
+
+Loci Federated Continual Learning
+- `LociClient` keeps the heterogeneous local model private and exchanges a compact KD model
+- `LociServer` performs task-level similarity selection and optimal-transport model fusion
+- `TaskMemoryPalace` stores magnitude-pruned knowledge once per completed client task
+- `FCL/run_Loci.py` runs the paper's heterogeneous client-task protocol
+- `FCL_robust/run_own.py` runs snapshot-free RAMP-LOCI with robust GEM constraints and boundary-aware task knowledge
 
 Standalone robust FL baselines
 - `FL_robust/run_FAT.py`
@@ -106,7 +116,105 @@ python -m cl_fcl_baseline.experiments.CL_robust.run_TABA
 
 Run FedWeIT:
 ```bash
-python -m cl_fcl_baseline.experiments.run_FedWeIT
+python -m cl_fcl_baseline.experiments.FCL.run_FedWeIT
+```
+
+Run Loci:
+```bash
+python -m cl_fcl_baseline.experiments.FCL.run_Loci \
+  --dataset cifar100 --model ResNet18 --loci-kd-model SixCNN
+```
+
+The newer classification FCL runners default to the paper-common ViT-B/16 shape
+(`ViTBasePatch16`, 224px input, patch size 16).  They also accept the original
+spellings `ViT-B/16`, `vitb16`, and `vit_base_patch16_224`.  Paper datasets such as
+ImageNet-R, CUB-200, DomainNet, Office-Home, Five-Datasets, Tiny-ImageNet, and the
+Fed-Duet fine-grained datasets are available through `--dataset`; see
+`cl_fcl_baseline/algorithms/FCL/README.md` for the per-method mapping and local
+directory conventions.
+
+MoAFCL, MultiFCL, and Fed-Duet use a complete original OpenAI CLIP checkpoint.
+Place `ViT-B-16.pt` under `cl_fcl_baseline/experiments/checkpoint/` or pass an
+explicit path:
+
+```bash
+python -m cl_fcl_baseline.experiments.FCL.run_MultiFCL \
+  --model ViTBasePatch16 --image-size 224 \
+  --backbone-source clip --backbone-checkpoint path/to/ViT-B-16.pt
+```
+
+The loader restores both encoders, both projection matrices and CLIP's learned
+temperature, and the data pipeline selects CLIP RGB normalization. The
+checkpoint must match the selected visual architecture; for example, ViT-B/32
+weights cannot be loaded into `ViTBasePatch16`. Use `--clip-bpe-path` if the
+OpenAI BPE asset is not discoverable from `otherswork`.
+
+Run RAMP-LOCI (recommended `own` variant):
+```bash
+python -m cl_fcl_baseline.experiments.FCL_robust.run_own \
+  --dataset cifar100 --model ResNet32 --loci-kd-model SixCNN \
+  --own-variant ramp
+```
+
+RAMP-LOCI does not retain a previous-model snapshot. It combines hard labels
+and the incoming LOCI model into one target per clean/adversarial view, sends
+clean-to-adversarial boundary displacement through the compact KD model, and
+uses the existing bounded GEM samples to constrain each old task's robust
+risk. The clean gradient is treated as the primary update: conflicting robust
+components are projected out and the robust norm is capped by
+`--own-robust-gradient-ratio`. Server OT fusion performs a short line search
+and is accepted only when public clean accuracy is preserved and adversarial
+loss improves; active classifier rows are never averaged with untrained rows
+from unrelated tasks. Separate boundary replay and labeled public refinement
+are disabled by default.
+
+Loci uses the paper's GEM local continual learner and independently shuffled
+task orders by default. Pass `--loci-continual-method ewc` for the EWC
+ablation, or
+`--no-heterogeneous-task-order` for a shared client task stream. Its main
+paper controls are `--loci-similarity`, `--loci-similar-tasks`,
+`--loci-knowledge-ratio`, `--loci-ot-regularization`, and
+`--loci-integrator-weight`.
+
+All image-classification runners support `cifar100`, `miniimagenet`,
+`tinyimagenet`, `fc100`, `core50`, `imagenet`, `imagenet100`, `imagenetr`,
+`cub200`, `domainnet`, `domainnetsub`, `officehome`, `adaptiope`, `pacs`,
+`flowers102`, `oxfordpets`, `food101`, `caltech101`, `dtd`, `notmnist`, and
+the FedMGP `five_datasets` benchmark. They also accept original spellings such
+as `ImageNet-R`, `CUB-200`, `Office-Home`, `Flowers-102`, and `5datasets`.
+Place local data below `--data-dir` using one of these layouts:
+
+- CIFAR100: `cifar-100-python/{train,test}`; it is downloaded and extracted
+  automatically when missing.
+- MiniImageNet: `mini-imagenet/images`, `new_train.csv`, `new_val.csv`, and
+  `classes_name.json`.
+- TinyImageNet: `tiny-imagenet-200/train.csv` and `test.csv`, or the standard
+  `train/<wnid>/images` plus `val/images` and `val_annotations.txt` layout.
+- FC100: `FC100/train`, `train_csv`, and `test_csv`.
+- CORe50: `core50/core50_128x128` and
+  `core50/task_label/<task>/{train,test}.csv`.
+- ImageNet: `ImageNet/train/<class>` and `ImageNet/val/<class>`.
+- ImageNet-R: `imagenet-r/<class>/<image>`; a deterministic per-class 80/20
+  split is used when explicit split files are absent.
+- CUB-200: `cub200/CUB_200_2011/{images.txt,train_test_split.txt,images/}`.
+- Domain datasets: `DomainNet|OfficeHome|PACS/<domain>/<class>/<image>`, or
+  original `*_train.txt` / `*_test.txt` split lists.
+- Food-101, Oxford Pets, and DTD use their standard `meta/`, `annotations/`,
+  and `labels/` split files; ordinary `train/<class>` and `test/<class>`
+  layouts are also accepted for all folder datasets.
+
+The original CV model families are also available to every method through the
+shared model factory: `SixCNN`, `LociResNet18`, `WideResNet50`, `MobileNetV2`,
+`DenseNet121`, `SixLayerViT`, and `TinyPiT`. Per-client heterogeneity can be
+reproduced in one process:
+
+```bash
+python -m cl_fcl_baseline.experiments.FCL.run_Loci \
+  --dataset MiniImageNet --data-dir data \
+  --loci-client-models SixCNN LociResNet18 MobileNetV2 DenseNet121 TinyPiT \
+  --loci-client-lrs 0.001 0.0008 \
+  --loci-client-local-epochs 2 1 \
+  --num-clients 10 --client-sample-ratio 0.4 --num-tasks 10 --rounds-per-task 5
 ```
 
 Robust FedWeIT runners live under `cl_fcl_baseline/experiments/FCL_robust/` and the standalone robust FL baselines live under `cl_fcl_baseline/experiments/FL_robust/`.
@@ -437,7 +545,7 @@ Common options:
 Example:
 configuration:
 ```bash
-python -m cl_fcl_baseline.experiments.run_FedWeIT \
+python -m cl_fcl_baseline.experiments.FCL.run_FedWeIT \
   --dataset cifar100 \
   --model ResNet32 \
   --num-clients 5 \

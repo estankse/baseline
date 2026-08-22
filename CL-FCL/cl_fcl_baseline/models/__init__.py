@@ -6,10 +6,37 @@ from .builder import (
     MODEL_NAMES,
     build_model,
     build_model_from_args,
+    normalize_model_name,
+)
+from .loci_models import (
+    LociDenseNet121,
+    LociMobileNetV2,
+    LociResNet18,
+    LociSixLayerViT,
+    LociTinyPiT,
+    LociWideResNet50,
+    SixCNN,
+    build_extended_image_model,
+)
+from .fcl_models import (
+    BottleneckAdapter,
+    PrefixPromptPool,
+    PromptPool,
+    PromptedVisionTransformer,
+    SparseAdapterGate,
+)
+from .clip_vlm import (
+    CLIPTextTower,
+    CLIPVisionLanguageModel,
+    FeaturePromptAdapter,
+    SimpleCLIPTokenizer,
+    default_bpe_path,
+    infer_class_names,
+    semantic_prompt_repository,
 )
 from .model import ResNet18, ResNet20, ResNet32, VGG11
 from .simple_model import MLPClassifier, SimpleCNN
-from .vit import ViTBase, ViTSmall, ViTTiny
+from .vit import ViTBase, ViTBasePatch16, ViTSmall, ViTTiny
 
 __all__ = [
     "MODEL_NAMES",
@@ -19,8 +46,17 @@ __all__ = [
     "DEFAULT_VIT_MLP_RATIO",
     "build_model",
     "build_model_from_args",
+    "normalize_model_name",
     "MLPClassifier",
     "SimpleCNN",
+    "SixCNN",
+    "LociMobileNetV2",
+    "LociDenseNet121",
+    "LociWideResNet50",
+    "LociTinyPiT",
+    "LociResNet18",
+    "LociSixLayerViT",
+    "build_extended_image_model",
     "VGG11",
     "ResNet18",
     "ResNet20",
@@ -28,4 +64,17 @@ __all__ = [
     "ViTTiny",
     "ViTSmall",
     "ViTBase",
+    "ViTBasePatch16",
+    "BottleneckAdapter",
+    "PrefixPromptPool",
+    "PromptPool",
+    "PromptedVisionTransformer",
+    "SparseAdapterGate",
+    "CLIPTextTower",
+    "CLIPVisionLanguageModel",
+    "FeaturePromptAdapter",
+    "SimpleCLIPTokenizer",
+    "default_bpe_path",
+    "infer_class_names",
+    "semantic_prompt_repository",
 ]

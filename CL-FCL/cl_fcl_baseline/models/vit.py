@@ -18,6 +18,7 @@ VIT_VARIANTS = {
     "ViTTiny": ViTVariantSpec(embed_dim=192, depth=12, num_heads=3),
     "ViTSmall": ViTVariantSpec(embed_dim=384, depth=12, num_heads=6),
     "ViTBase": ViTVariantSpec(embed_dim=768, depth=12, num_heads=12),
+    "ViTBasePatch16": ViTVariantSpec(embed_dim=768, depth=12, num_heads=12),
 }
 
 
@@ -262,3 +263,25 @@ class ViTBase(VisionTransformer):
             attention_dropout=attention_dropout,
         )
 
+
+class ViTBasePatch16(ViTBase):
+    """ViT-B/16 architecture used by the prompt/CLIP-based FCL papers."""
+
+    def __init__(
+        self,
+        input_shape: Sequence[int] = (3, 224, 224),
+        num_classes: int = 100,
+        patch_size: int = 16,
+        mlp_ratio: float = 4.0,
+        dropout: float = 0.0,
+        attention_dropout: float = 0.0,
+    ) -> None:
+        del patch_size
+        super().__init__(
+            input_shape=input_shape,
+            num_classes=num_classes,
+            patch_size=16,
+            mlp_ratio=mlp_ratio,
+            dropout=dropout,
+            attention_dropout=attention_dropout,
+        )

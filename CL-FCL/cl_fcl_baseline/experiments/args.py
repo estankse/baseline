@@ -1,13 +1,25 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
+from cl_fcl_baseline.datasets import DATASET_NAMES, normalize_dataset_name
 from cl_fcl_baseline.models import (
     DEFAULT_VIT_ATTENTION_DROPOUT,
     DEFAULT_VIT_DROPOUT,
     DEFAULT_VIT_MLP_RATIO,
     DEFAULT_VIT_PATCH_SIZE,
+    MODEL_NAMES,
+    normalize_model_name,
 )
+
+CLASSIFICATION_DATASETS = ("random_classification", *DATASET_NAMES)
+
+
+def _normalize_classification_dataset(name: str) -> str:
+    if str(name).lower() == "random_classification":
+        return "random_classification"
+    return normalize_dataset_name(name)
 
 
 
@@ -24,19 +36,37 @@ def _add_common_fl_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--noniid-shards", type=int, default=2)
     parser.add_argument("--dirichlet-beta", type=float, default=0.5)
     parser.add_argument("--num-rounds", type=int, default=200)
-    parser.add_argument("--local_epochs", type=int, default=10)
+    parser.add_argument(
+        "--local-epochs",
+        "--local_epochs",
+        dest="local_epochs",
+        type=int,
+        default=10,
+    )
     parser.add_argument("--batch-size", type=int, default=128, help="<=0 for full-batch")
     parser.add_argument("--lr", type=float, default=0.0001)
     parser.add_argument("--optimizer", type=str, default="adam", choices=["sgd", "adam"])
-    parser.add_argument("--dataset", type=str, default="cifar100", choices=["mnist", "cifar10", "cifar100"])
+    parser.add_argument("--dataset", type=normalize_dataset_name, default="cifar100", choices=DATASET_NAMES)
     parser.add_argument("--data-dir", type=str, default="data")
+    parser.add_argument(
+        "--image-size",
+        type=int,
+        default=32,
+        help="input image size; ViT-B/16 paper configurations use 224",
+    )
+    parser.add_argument(
+        "--download",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="download torchvision datasets when missing; folder datasets are always local",
+    )
     parser.add_argument("--num-samples", type=int, default=0, help="<=0 for full-dataset")
     parser.add_argument("--num-classes", type=int, default=100)
     parser.add_argument(
         "--model",
-        type=str,
+        type=normalize_model_name,
         default="ResNet32",
-        choices=["mlp", "simplecnn", "VGG11", "ResNet18", "ResNet20", "ResNet32", "ViTTiny", "ViTSmall", "ViTBase"],
+        choices=MODEL_NAMES,
     )
     parser.add_argument("--hidden-dim", type=int, default=200)
     parser.add_argument("--vit-patch-size", type=int, default=DEFAULT_VIT_PATCH_SIZE, help="patch size used by ViT backbones; must divide the input height and width")
@@ -191,14 +221,26 @@ def _add_common_cl_args(
     parser.add_argument("--scenario", type=str, default=scenario, choices=["class", "task", "domain"])
     parser.add_argument(
         "--dataset",
-        type=str,
+        type=_normalize_classification_dataset,
         default="cifar100",
-        choices=["random_classification", "mnist", "cifar10", "cifar100"],
+        choices=CLASSIFICATION_DATASETS,
     )
     parser.add_argument("--data-dir", type=str, default="data")
     parser.add_argument("--num-samples", type=int, default=0, help="<=0 for full-dataset")
     parser.add_argument("--num-classes", type=int, default=100)
     parser.add_argument("--input-shape", type=int, nargs=3, default=[1, 28, 28])
+    parser.add_argument(
+        "--image-size",
+        type=int,
+        default=32,
+        help="input image size; ViT-B/16 paper configurations use 224",
+    )
+    parser.add_argument(
+        "--download",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="download torchvision datasets when missing; folder datasets are always local",
+    )
     parser.add_argument("--num-tasks", type=int, default=0)
     parser.add_argument("--classes-per-task", type=int, default=10)
     parser.add_argument(
@@ -211,9 +253,9 @@ def _add_common_cl_args(
     parser.add_argument("--epochs", type=int, default=epochs)
     parser.add_argument(
         "--model",
-        type=str,
+        type=normalize_model_name,
         default=default_model,
-        choices=["mlp", "simplecnn", "VGG11", "ResNet18", "ResNet20", "ResNet32", "ViTTiny", "ViTSmall", "ViTBase"],
+        choices=MODEL_NAMES,
     )
     parser.add_argument("--hidden-dim", type=int, default=hidden_dim)
     parser.add_argument("--vit-patch-size", type=int, default=DEFAULT_VIT_PATCH_SIZE, help="patch size used by ViT backbones; must divide the input height and width")
@@ -509,21 +551,45 @@ def _add_common_fcl_args() -> argparse.ArgumentParser:
             "(the 0718 protocol), while task groups by the actual task ID"
         ),
     )
-    parser.add_argument("--classes-per-task", type=int, default=10)
+    parser.add_argument("--classes-per-task", type=int, default=20)
     parser.add_argument("--rounds-per-task", type=int, default=10)
-    parser.add_argument("--local_epochs", type=int, default=10)
+    parser.add_argument(
+        "--local-epochs",
+        "--local_epochs",
+        dest="local_epochs",
+        type=int,
+        default=10,
+    )
     parser.add_argument("--batch-size", type=int, default=64, help="<=0 for full-batch")
     parser.add_argument("--lr", type=float, default=0.005)
     parser.add_argument("--optimizer", type=str, default="adam", choices=["sgd", "adam"])
-    parser.add_argument("--dataset", type=str, default="cifar100", choices=["mnist", "cifar10", "cifar100"])
+    parser.add_argument(
+        "--dataset",
+        type=_normalize_classification_dataset,
+        default="imagenetr",
+        choices=CLASSIFICATION_DATASETS,
+    )
     parser.add_argument("--data-dir", type=str, default="data")
     parser.add_argument("--num-samples", type=int, default=0, help="<=0 for full-dataset")
     parser.add_argument("--num-classes", type=int, default=100)
+    parser.add_argument("--input-shape", type=int, nargs=3, default=[1, 28, 28])
+    parser.add_argument(
+        "--image-size",
+        type=int,
+        default=32,
+        help="input image size; ViT-B/16 paper configurations use 224",
+    )
+    parser.add_argument(
+        "--download",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="download torchvision datasets when missing; folder datasets are always local",
+    )
     parser.add_argument(
         "--model",
-        type=str,
+        type=normalize_model_name,
         default="ResNet32",
-        choices=["mlp", "simplecnn", "VGG11", "ResNet18", "ResNet20", "ResNet32", "ViTTiny", "ViTSmall", "ViTBase"],
+        choices=MODEL_NAMES,
     )
     parser.add_argument("--hidden-dim", type=int, default=200)
     parser.add_argument("--vit-patch-size", type=int, default=DEFAULT_VIT_PATCH_SIZE, help="patch size used by ViT backbones; must divide the input height and width")
@@ -538,11 +604,6 @@ def _add_common_fcl_args() -> argparse.ArgumentParser:
 def build_fedweit_parser() -> argparse.ArgumentParser:
     parser = _add_common_fcl_args()
     parser.description = "Run a FedWeIT baseline."
-    for action in parser._actions:
-        if action.dest == "dataset":
-            action.choices = ["random_classification", "mnist", "cifar10", "cifar100"]
-            action.default = "cifar100"
-            break
     parser.add_argument("--algorithm", type=str, default="fedweit", choices=["fedweit"])
     parser.add_argument("--lambda1", type=float, default=0.0005, help="FedWeIT lambda_l1 for adaptive parameters.")
     parser.add_argument("--lambda2", type=float, default=30.0, help="FedWeIT lambda_l2 retroactive coefficient.")
@@ -552,7 +613,6 @@ def build_fedweit_parser() -> argparse.ArgumentParser:
     parser.add_argument("--mask-threshold", type=float, default=0.5, help=argparse.SUPPRESS)
     parser.add_argument("--client-sparsity", type=float, default=0.3, help="fraction of smallest raw-mask entries pruned from communicable B*m.")
     parser.add_argument("--adaptive-threshold", type=float, default=-1.0, help="hard threshold for communicable A; <0 uses lambda1.")
-    parser.add_argument("--input-shape", type=int, nargs=3, default=[1, 28, 28])
     return parser
 
 
@@ -560,12 +620,7 @@ def build_fedweit_parser() -> argparse.ArgumentParser:
 def build_fedknow_parser() -> argparse.ArgumentParser:
     parser = _add_common_fcl_args()
     parser.description = "Run a FedKNOW baseline."
-    for action in parser._actions:
-        if action.dest == "dataset":
-            action.choices = ["random_classification", "mnist", "cifar10", "cifar100"]
-            action.default = "cifar100"
-            break
-    _set_algorithm_choice(parser, "fedknow")
+    parser.add_argument("--algorithm", type=str, default="fedknow", choices=["fedknow"])
     parser.add_argument("--knowledge-ratio", type=float, default=0.1, help="FedKNOW rho: ratio of top-magnitude weights retained as signature task knowledge.")
     parser.add_argument("--signature-k", type=int, default=10, help="number of most dissimilar signature task gradients integrated for each batch.")
     parser.add_argument("--integrator-steps", type=int, default=100, help="projected-gradient steps used to solve FedKNOW's dual QP gradient integrator.")
@@ -574,7 +629,268 @@ def build_fedknow_parser() -> argparse.ArgumentParser:
     parser.add_argument("--distillation-warmup-epochs", type=int, default=2, help="dense old-model distillation epochs before FedKNOW representation integration; the reference code uses 2.")
     parser.add_argument("--restorer-loss", type=str, default="soft", choices=["hard", "soft"], help="loss used by the gradient restorer: hard pseudo labels or soft KL targets from retained knowledge.")
     parser.add_argument("--restorer-temperature", type=float, default=2.0, help="temperature used for FedKNOW soft distillation in the gradient restorer.")
-    parser.add_argument("--input-shape", type=int, nargs=3, default=[1, 28, 28])
+    return parser
+
+
+def build_loci_parser() -> argparse.ArgumentParser:
+    parser = _add_common_fcl_args()
+    parser.description = "Run the Loci task-grained FCL algorithm."
+    # GEM projects the SGD update direction. Adam or momentum would transform
+    # that direction after projection and no longer implement GEM's constraint.
+    parser.set_defaults(
+        heterogeneous_task_order=True,
+        classes_per_task=0,
+        optimizer="sgd",
+    )
+    parser.add_argument("--algorithm", type=str, default="loci", choices=["loci"])
+    parser.add_argument("--loci-kd-model", type=normalize_model_name, default="SixCNN", choices=MODEL_NAMES, help="common compact model exchanged by heterogeneous Loci clients")
+    parser.add_argument("--loci-client-models", type=normalize_model_name, nargs="+", default=[], choices=MODEL_NAMES, help="optional heterogeneous main-model list, cycled across clients")
+    parser.add_argument("--loci-client-lrs", type=float, nargs="+", default=[], help="optional per-client learning rates, cycled across clients")
+    parser.add_argument("--loci-client-local-epochs", type=int, nargs="+", default=[], help="optional per-client local epoch counts, cycled across clients")
+    parser.add_argument("--loci-kd-hidden-dim", type=int, default=128)
+    parser.add_argument("--loci-kd-epochs", type=int, default=1)
+    parser.add_argument("--loci-kd-lr", type=float, default=0.001)
+    parser.add_argument("--loci-temperature", type=float, default=2.0)
+    parser.add_argument("--loci-kd-alpha", type=float, default=0.5, help="weight of teacher KL in local KD-model extraction")
+    parser.add_argument("--loci-integrator-weight", type=float, default=1.0, help="coefficient multiplying the accuracy-weighted KD gradient in Eq. (7)")
+    parser.add_argument("--loci-continual-method", type=str, default="gem", choices=["gem", "ewc"], help="client-side continual learner; the Loci paper evaluates GEM")
+    parser.add_argument("--loci-ewc-lambda", type=float, default=100.0)
+    parser.add_argument("--loci-weight-decay", type=float, default=0.0)
+    parser.add_argument("--loci-fisher-batches", type=int, default=0, help="batches used for EWC Fisher estimation; <=0 uses the complete task partition")
+    parser.add_argument("--loci-gem-memory-size", type=int, default=256, help="GEM episodic examples retained per task")
+    parser.add_argument("--loci-gem-memory-strength", type=float, default=0.5, help="GEM projection margin")
+    parser.add_argument("--loci-gem-qp-eps", type=float, default=1e-3, help="diagonal stabilizer for GEM's dual QP")
+    parser.add_argument("--loci-knowledge-ratio", type=float, default=0.05, help="fraction of largest-magnitude KD weights retained as task knowledge")
+    parser.add_argument("--loci-knowledge-finetune-epochs", type=int, default=1)
+    parser.add_argument("--loci-similar-tasks", type=int, default=4)
+    parser.add_argument("--loci-similarity", type=str, default="activation", choices=["activation", "weight"])
+    parser.add_argument("--loci-selector-candidates", type=int, default=20, help="weight-index shortlist size before activation scoring; <=0 scans all knowledge")
+    parser.add_argument("--loci-selector-batches", type=int, default=5, help="server public batches used by activation similarity; <=0 uses all")
+    parser.add_argument("--loci-public-samples", type=int, default=64, help="public samples retained per task for activation similarity; <=0 uses all")
+    parser.add_argument("--loci-ot-regularization", type=float, default=0.05)
+    parser.add_argument("--loci-ot-iterations", type=int, default=20)
+    parser.add_argument("--loci-image-size", type=int, default=32)
+    return parser
+
+
+def _set_vit_b16_defaults(parser: argparse.ArgumentParser) -> None:
+    parser.set_defaults(
+        model="ViTBasePatch16",
+        optimizer="adam",
+        image_size=224,
+        vit_patch_size=16,
+    )
+
+
+def _add_prompt_backbone_args(parser: argparse.ArgumentParser) -> None:
+    _set_vit_b16_defaults(parser)
+    parser.add_argument(
+        "--backbone-source",
+        type=str,
+        choices=["vit", "clip"],
+        default="vit",
+        help=(
+            "checkpoint architecture: vit loads repository/Google ViT weights; "
+            "clip loads an original OpenAI CLIP ViT visual tower"
+        ),
+    )
+    parser.add_argument("--fcl-embed-dim", type=int, default=768)
+    parser.add_argument("--fcl-depth", type=int, default=12)
+    parser.add_argument("--fcl-num-heads", type=int, default=12)
+    parser.add_argument("--fcl-adapter-dim", type=int, default=64)
+    parser.add_argument("--fcl-prompt-pool-size", type=int, default=10)
+    parser.add_argument("--fcl-prompt-length", type=int, default=5)
+    parser.add_argument("--fcl-prompt-top-k", type=int, default=1)
+    parser.add_argument(
+        "--backbone-checkpoint",
+        type=str,
+        default=str(Path(__file__).resolve().parent / "checkpoint" / "ViT-B_16.npz"),
+        help=(
+            "pretrained PromptedVisionTransformer state dict, official Google ViT "
+            ".npz, or OpenAI CLIP .pt selected by --backbone-source; VLM runners "
+            "also restore CLIP's text tower, projections and temperature"
+        ),
+    )
+
+
+def _set_clip_vlm_defaults(parser: argparse.ArgumentParser) -> None:
+    """Defaults for methods whose published objective requires both CLIP towers."""
+    parser.set_defaults(
+        backbone_source="clip",
+        backbone_checkpoint=str(
+            Path(__file__).resolve().parent / "checkpoint" / "ViT-B-16.pt"
+        ),
+    )
+    parser.add_argument(
+        "--clip-bpe-path",
+        type=str,
+        default="",
+        help="optional path to OpenAI bpe_simple_vocab_16e6.txt.gz",
+    )
+
+
+def build_fedprotip_parser() -> argparse.ArgumentParser:
+    parser = _add_common_fcl_args()
+    parser.description = "Run FedProTIP with local replay-free gradient projection."
+    _add_prompt_backbone_args(parser)
+    parser.set_defaults(lr=1e-3)
+    parser.add_argument("--algorithm", default="fedprotip", choices=["fedprotip"])
+    parser.add_argument("--fedprotip-threshold", type=float, default=0.7)
+    parser.add_argument("--fedprotip-activation-batches", type=int, default=5)
+    parser.add_argument("--fedprotip-activation-columns", type=int, default=512)
+    return parser
+
+
+def build_fedvit_parser() -> argparse.ArgumentParser:
+    parser = _add_common_fcl_args()
+    parser.description = (
+        "Run the classification-compatible FedViT entry. The original FedViT paper "
+        "is an image-restoration split-transformer and requires a paired-image pipeline."
+    )
+    _add_prompt_backbone_args(parser)
+    parser.set_defaults(lr=5e-4, optimizer="adam")
+    parser.add_argument("--algorithm", default="fedvit", choices=["fedvit"])
+    parser.add_argument("--fedvit-head-epochs", type=int, default=1)
+    parser.add_argument("--fedvit-post-aggregation-epochs", type=int, default=1)
+    parser.add_argument("--fedvit-knowledge-ratio", type=float, default=0.1)
+    parser.add_argument("--fedvit-signature-k", type=int, default=10)
+    parser.add_argument("--fedvit-integrator-steps", type=int, default=100)
+    parser.add_argument("--fedvit-weight-decay", type=float, default=0.05)
+    return parser
+
+
+def build_fedmgp_parser() -> argparse.ArgumentParser:
+    parser = _add_common_fcl_args()
+    parser.description = "Run FedMGP multi-granularity prompting."
+    _add_prompt_backbone_args(parser)
+    parser.set_defaults(lr=1e-3)
+    parser.add_argument("--algorithm", default="fedmgp", choices=["fedmgp"])
+    parser.add_argument("--fedmgp-pull-constraint", type=float, default=0.1)
+    parser.add_argument("--fedmgp-local-prompt-length", type=int, default=5)
+    parser.add_argument("--fedmgp-local-prompt-layers", type=int, default=3)
+    parser.add_argument("--fedmgp-fusion-epochs", type=int, default=1)
+    parser.add_argument("--fedmgp-fusion-lr", type=float, default=1e-3)
+    parser.add_argument("--server-public-samples", type=int, default=64)
+    return parser
+
+
+def build_moafcl_parser() -> argparse.ArgumentParser:
+    parser = _add_common_fcl_args()
+    parser.description = "Run MoAFCL feature-aware adapter federation."
+    _add_prompt_backbone_args(parser)
+    _set_clip_vlm_defaults(parser)
+    parser.set_defaults(
+        lr=1e-4,
+        dataset="officehome",
+        num_clients=10,
+        client_sample_ratio=1.0,
+        num_tasks=10,
+        rounds_per_task=1,
+        local_epochs=1,
+        batch_size=32,
+    )
+    parser.add_argument("--algorithm", default="moafcl", choices=["moafcl"])
+    parser.add_argument("--moafcl-num-adapters", type=int, default=5)
+    parser.add_argument("--moafcl-gate-top-k", type=int, default=1)
+    parser.add_argument("--moafcl-gate-temperature", type=float, default=5.0)
+    parser.add_argument("--moafcl-gate-lr", type=float, default=1.5)
+    parser.add_argument("--moafcl-gate-epochs", type=int, default=500)
+    parser.add_argument("--moafcl-dp-epsilon", type=float, default=100.0)
+    parser.add_argument("--moafcl-summary-batches", type=int, default=10)
+    parser.add_argument("--moafcl-extract-layer", type=int, default=5)
+    parser.add_argument("--moafcl-prompt-length", type=int, default=8)
+    parser.add_argument("--moafcl-adapter-hidden-dim", type=int, default=1024)
+    parser.add_argument("--scenario", choices=["class", "domain"], default="domain")
+    return parser
+
+
+def build_multifcl_parser() -> argparse.ArgumentParser:
+    parser = _add_common_fcl_args()
+    parser.description = "Run MultiFCL multi-scale expertise orchestration."
+    _add_prompt_backbone_args(parser)
+    _set_clip_vlm_defaults(parser)
+    parser.set_defaults(
+        seed=42,
+        # dataset="cub200",
+        # partition="iid",
+        num_clients=10,
+        client_sample_ratio=1.0,
+        # num_tasks=10,
+        rounds_per_task=5,
+        local_epochs=5,
+        batch_size=32,
+    )
+    parser.add_argument("--algorithm", default="multifcl", choices=["multifcl"])
+    parser.add_argument("--multifcl-num-experts", type=int, default=4)
+    parser.add_argument("--multifcl-adapter-lr", type=float, default=1e-4)
+    parser.add_argument("--multifcl-head-lr", type=float, default=3e-3)
+    parser.add_argument("--multifcl-weight-decay", type=float, default=5e-2)
+    parser.add_argument("--multifcl-adapter-dropout", type=float, default=0.1)
+    return parser
+
+
+def build_powder_parser() -> argparse.ArgumentParser:
+    parser = _add_common_fcl_args()
+    parser.description = "Run Powder prompt-based dual knowledge transfer."
+    _add_prompt_backbone_args(parser)
+    parser.set_defaults(
+        lr=5e-3,
+        # partition="iid",
+        # heterogeneous_task_order=True,
+        # rounds_per_task=3,
+        fcl_prompt_length=8,
+        # num_rounds = 30
+    )
+    parser.add_argument("--algorithm", default="powder", choices=["powder"])
+    parser.add_argument("--powder-top-k-tasks", type=int, default=3)
+    parser.add_argument("--powder-correlation-power", type=float, default=30.0)
+    parser.add_argument("--powder-dual-weight", type=float, default=1.0)
+    parser.add_argument("--powder-temperature", type=float, default=3.0)
+    parser.add_argument(
+        "--powder-prompt-layers",
+        type=int,
+        nargs="+",
+        default=[3, 4, 5],
+        help="zero-based ViT blocks receiving prompt-tuning tokens; paper default is blocks 4,5,6",
+    )
+    return parser
+
+
+def build_fedduet_parser() -> argparse.ArgumentParser:
+    parser = _add_common_fcl_args()
+    parser.description = "Run Fed-Duet dual semantic/parametric experts."
+    _add_prompt_backbone_args(parser)
+    _set_clip_vlm_defaults(parser)
+    parser.set_defaults(
+        lr=3e-4,
+        dataset="cifar100",
+        partition="iid",
+        num_clients=5,
+        client_sample_ratio=1.0,
+        num_tasks=10,
+        classes_per_task=10,
+        rounds_per_task=10,
+        local_epochs=1,
+        batch_size=16,
+    )
+    parser.add_argument("--algorithm", default="fedduet", choices=["fedduet"])
+    parser.add_argument("--fedduet-repository-size", type=int, default=64)
+    parser.add_argument("--fedduet-num-experts", type=int, default=8)
+    parser.add_argument("--fedduet-dispatch-count", type=int, default=4)
+    parser.add_argument("--fedduet-phase-switch-round", type=int, default=5)
+    parser.add_argument("--fedduet-shared-logit-weight", type=float, default=0.5)
+    parser.add_argument("--fedduet-moe-weight", type=float, default=1.0)
+    parser.add_argument("--fedduet-cross-modal-weight", type=float, default=1.0)
+    parser.add_argument("--fedduet-stability-weight", type=float, default=1.0)
+    parser.add_argument("--fedduet-gate-lr", type=float, default=1e-3)
+    parser.add_argument("--fedduet-fusion-heads", type=int, default=8)
+    parser.add_argument("--fedduet-fusion-dropout", type=float, default=0.2)
+    parser.add_argument("--fedduet-top-k", type=int, default=2)
+    parser.add_argument("--fedduet-adapter-dropout", type=float, default=0.4)
+    parser.add_argument("--fedduet-adapter-scale", type=float, default=0.3)
+    parser.add_argument("--scenario", choices=["class", "domain"], default="class")
+    parser.add_argument("--fedduet-dp-clip", type=float, default=0.0)
+    parser.add_argument("--fedduet-dp-noise-multiplier", type=float, default=0.0)
     return parser
 
 
@@ -616,23 +932,196 @@ def _parse_fedweit_fat_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _parse_fedweit_own_args() -> argparse.Namespace:
-    parser = build_fedweit_parser()
-    parser.description = "Run FedWeIT with the risk-aware personalized UAP defense variant and PGD FL_robust evaluation."
-    _set_algorithm_choice(parser, "fedweit_own")
+def build_own_parser() -> argparse.ArgumentParser:
+    """Build the RAMP-LOCI runner and its three legacy robust-loss ablations."""
+    parser = build_loci_parser()
+    parser.description = (
+        "Run RobustLoci: task-aware adversarial training and robust knowledge "
+        "distillation inside LOCI."
+    )
+    parser.set_defaults(
+        local_epochs=5,
+        rounds_per_task=20,
+        num_rounds=200,
+        loci_kd_epochs=3,
+        loci_ewc_lambda=10.0,
+        loci_knowledge_ratio=0.2,
+        loci_similar_tasks=2,
+        loci_public_samples=128,
+    )
+    _set_algorithm_choice(parser, "own")
     _add_pgd_args(parser)
-    parser.add_argument("--own-uap-epsilon", type=float, default=10.0 / 255.0, help="L-inf radius for the local universal perturbation. For normalized torchvision datasets this is interpreted in raw pixel space unless --own-uap-normalized-space is set.")
-    parser.add_argument("--own-uap-lr", type=float, default=0.05, help="optimizer learning rate for local UAP generation")
-    parser.add_argument("--own-uap-gen-epochs", type=int, default=2, help="number of local epochs used to generate each client's UAP")
-    parser.add_argument("--own-uap-data-ratio", type=float, default=0.1, help="fraction of the local task dataset used for UAP generation")
-    parser.add_argument("--own-uap-normalized-space", action="store_true", default=False, help="treat --own-uap-epsilon as model input-space values instead of raw pixel-space values")
-    parser.add_argument("--own-adv-epochs", type=int, default=4, help="number of local defense epochs after each aggregation")
-    parser.add_argument("--own-stage1-epochs", type=int, default=2, help="number of early defense epochs that perturb only high-risk samples with the full personalized UAP pool")
-    parser.add_argument("--own-adv-mix-ratio", type=float, default=0.1, help="probability of perturbing low-risk samples during stage 2 of local defense")
-    parser.add_argument("--own-conf-threshold", type=float, default=0.1, help="samples below this max-softmax confidence are treated as high risk")
-    parser.add_argument("--own-defense-lr-scale", type=float, default=0.5, help="multiplier applied to the base learning rate during the local defense phase")
-    parser.add_argument("--own-k-uap", type=int, default=2, help="number of most similar peer UAPs added to each client's personalized defense pool")
-    return parser.parse_args()
+    parser.add_argument(
+        "--own-variant",
+        type=str,
+        default="ramp",
+        choices=["ramp", "radt", "trades", "ard"],
+        help=(
+            "ramp uses snapshot-free robust GEM constraints and boundary-aware "
+            "LOCI integration; radt, trades and ard are legacy ablations"
+        ),
+    )
+    parser.add_argument(
+        "--own-epsilon",
+        type=float,
+        default=8.0 / 255.0,
+        help="training L-inf radius in raw pixel space unless --own-normalized-space is set",
+    )
+    parser.add_argument(
+        "--own-step-size",
+        type=float,
+        default=2.0 / 255.0,
+        help="training PGD step size in raw pixel space unless --own-normalized-space is set",
+    )
+    parser.add_argument("--own-steps", type=int, default=7)
+    parser.add_argument(
+        "--own-random-start", action=argparse.BooleanOptionalAction, default=True
+    )
+    parser.add_argument("--own-normalized-space", action="store_true", default=False)
+    parser.add_argument("--own-clean-weight", type=float, default=1.0)
+    parser.add_argument("--own-adversarial-weight", type=float, default=1.25)
+    parser.add_argument("--own-trades-weight", type=float, default=2.0)
+    parser.add_argument("--own-robust-kd-weight", type=float, default=1.0)
+    parser.add_argument(
+        "--own-boundary-weight",
+        type=float,
+        default=1.0,
+        help="weight of clean-to-adversarial boundary displacement transfer",
+    )
+    parser.add_argument(
+        "--own-robust-gradient-ratio",
+        type=float,
+        default=1.0,
+        help="maximum robust-gradient norm relative to the primary clean gradient",
+    )
+    parser.add_argument(
+        "--own-teacher-clean-weight",
+        type=float,
+        default=0.5,
+        help="clean-accuracy share in LOCI's incoming KD-teacher selection score",
+    )
+    parser.add_argument(
+        "--own-teacher-eval-batches",
+        type=int,
+        default=5,
+        help="local batches used to score incoming teachers; <=0 uses all",
+    )
+    parser.add_argument(
+        "--own-teacher-weight-floor",
+        type=float,
+        default=0.0,
+        help=(
+            "minimum reliability weight for the incoming KD teacher; zero avoids "
+            "forcing below-chance teachers observed in early RobustLoci rounds"
+        ),
+    )
+    parser.add_argument(
+        "--own-warmup-rounds",
+        type=int,
+        default=3,
+        help="linearly ramp robust losses over this many rounds within each task",
+    )
+    parser.add_argument("--own-fisher-adversarial-weight", type=float, default=1.0)
+    parser.add_argument(
+        "--own-importance-weight",
+        type=float,
+        default=1.0,
+        help="robust Fisher multiplier in memory-palace sparse-weight ranking",
+    )
+    parser.add_argument("--own-knowledge-robust-weight", type=float, default=1.0)
+    parser.add_argument("--own-class-balance-power", type=float, default=0.5)
+    parser.add_argument("--own-class-balance-smoothing", type=float, default=1e-3)
+    parser.add_argument("--own-class-weight-max", type=float, default=3.0)
+    parser.add_argument(
+        "--own-robust-memory-batch-size",
+        type=int,
+        default=32,
+        help="GEM examples per old task used to form each robust constraint; <=0 uses all",
+    )
+    parser.add_argument("--own-replay-budget", type=int, default=0)
+    parser.add_argument("--own-replay-batch-size", type=int, default=8)
+    parser.add_argument("--own-replay-selection-batches", type=int, default=5)
+    parser.add_argument("--own-replay-weight", type=float, default=1.0)
+    parser.add_argument("--own-public-refine-epochs", type=int, default=0)
+    parser.add_argument("--own-public-refine-lr-scale", type=float, default=0.5)
+    parser.add_argument(
+        "--own-robust-similarity",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="use clean/adversarial dual-view activation signatures for task selection",
+    )
+    parser.add_argument(
+        "--own-selector-steps",
+        type=int,
+        default=1,
+        help="PGD steps used for server dual-view activation signatures",
+    )
+    parser.add_argument(
+        "--own-fusion-clean-tolerance",
+        type=float,
+        default=0.0,
+        help="maximum public clean-accuracy drop allowed by guarded OT fusion",
+    )
+    parser.add_argument(
+        "--own-fusion-clean-loss-tolerance",
+        type=float,
+        default=0.02,
+        help="relative public clean-loss increase allowed by guarded OT fusion",
+    )
+    parser.add_argument(
+        "--own-fusion-min-robust-gain",
+        type=float,
+        default=0.0,
+        help="minimum decrease in public adversarial loss required to accept fusion",
+    )
+    return parser
+
+
+def parse_own_args() -> argparse.Namespace:
+    return build_own_parser().parse_args()
+
+
+def build_loci_robust_parser() -> argparse.ArgumentParser:
+    parser = build_loci_parser()
+    parser.description = (
+        "Run LOCI-AT: the original LOCI protocol with only local PGD "
+        "adversarial training and PGD robust evaluation added."
+    )
+    _set_algorithm_choice(parser, "loci_at")
+    _add_pgd_args(parser)
+    parser.set_defaults(
+        local_epochs=5,
+        rounds_per_task=20,
+        num_rounds=200,
+        loci_kd_epochs=3,
+        loci_ewc_lambda=10.0,
+        loci_knowledge_ratio=0.2,
+        loci_similar_tasks=2,
+        loci_public_samples=128,
+    )
+    parser.add_argument(
+        "--loci-adversarial-ratio",
+        type=float,
+        default=0.5,
+        help="proportion of each local minibatch replaced by PGD adversarial examples after warmup",
+    )
+    parser.add_argument(
+        "--loci-warmup-rounds",
+        type=int,
+        default=0,
+        help="number of initial rounds per task trained with --loci-warmup-adversarial-ratio",
+    )
+    parser.add_argument(
+        "--loci-warmup-adversarial-ratio",
+        type=float,
+        default=0.1,
+        help="adversarial minibatch proportion used during LOCI-AT warmup rounds",
+    )
+    return parser
+
+
+def parse_loci_robust_args() -> argparse.Namespace:
+    return build_loci_robust_parser().parse_args()
 
 
 def _parse_fedweit_sfat_args() -> argparse.Namespace:
@@ -713,6 +1202,38 @@ def parse_fedweit_args() -> argparse.Namespace:
 
 def parse_fedknow_args() -> argparse.Namespace:
     return build_fedknow_parser().parse_args()
+
+
+def parse_loci_args() -> argparse.Namespace:
+    return build_loci_parser().parse_args()
+
+
+def parse_fedprotip_args() -> argparse.Namespace:
+    return build_fedprotip_parser().parse_args()
+
+
+def parse_fedvit_args() -> argparse.Namespace:
+    return build_fedvit_parser().parse_args()
+
+
+def parse_fedmgp_args() -> argparse.Namespace:
+    return build_fedmgp_parser().parse_args()
+
+
+def parse_moafcl_args() -> argparse.Namespace:
+    return build_moafcl_parser().parse_args()
+
+
+def parse_multifcl_args() -> argparse.Namespace:
+    return build_multifcl_parser().parse_args()
+
+
+def parse_powder_args() -> argparse.Namespace:
+    return build_powder_parser().parse_args()
+
+
+def parse_fedduet_args() -> argparse.Namespace:
+    return build_fedduet_parser().parse_args()
 
 
 def parse_scaffold_args() -> argparse.Namespace:

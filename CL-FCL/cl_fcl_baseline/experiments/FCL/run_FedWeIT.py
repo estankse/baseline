@@ -9,7 +9,7 @@ import torch
 from torch.utils.data import Dataset
 
 from cl_fcl_baseline.algorithms.fcl import FCLExperiment, NaiveContinualStrategy
-from cl_fcl_baseline.algorithms.fedweit import FedWeITClient, FedWeITServer
+from cl_fcl_baseline.algorithms.FCL import FedWeITClient, FedWeITServer
 from cl_fcl_baseline.contracts import TaskDefinition
 from cl_fcl_baseline.datasets import build_class_incremental_tasks, build_torchvision_dataset, dataset_info
 from cl_fcl_baseline.datasets.build import (
@@ -24,9 +24,14 @@ from cl_fcl_baseline.trainers.trainer import BaseTrainer
 from cl_fcl_baseline.trainers.utils import set_seed
 
 try:
-    from .args import parse_fedweit_args
+    from ..args import parse_fedweit_args
 except ImportError:  # pragma: no cover
     from cl_fcl_baseline.experiments.args import parse_fedweit_args
+
+from cl_fcl_baseline.experiments.FCL.common import (
+    HistoricalTaskEvaluator,
+    evaluate_classification,
+)
 
 
 def _build_model(args: argparse.Namespace, input_shape: tuple[int, int, int], num_classes: int) -> torch.nn.Module:
@@ -164,6 +169,10 @@ def main() -> None:
         task_id: build_dataloader(dataset, batch_size=args.batch_size, shuffle=False)
         for task_id, dataset in test_datasets.items()
     }
+    task_classes = {
+        task.task_id: [int(class_id) for class_id in task.metadata.get("classes", [])]
+        for task in tasks
+    }
 
     clients = []
     for idx in range(args.num_clients):
@@ -210,58 +219,32 @@ def main() -> None:
     else:
         Path(log_path).parent.mkdir(parents=True, exist_ok=True)
 
-    def _eval_round(task_id: str, round_idx: int) -> None:
-        evaluation_groups = experiment.evaluation_task_groups
-        task_metrics: dict[str, dict[str, float]] = {}
-        avg_accuracy = 0.0
-        avg_loss = 0.0
-        for eval_task_id, client_task_ids in evaluation_groups:
-            evaluated_clients = 0
-            client_eval_samples = 0
-            client_accuracy = 0.0
-            client_loss = 0.0
-            for client in server.clients:
-                client_task_id = client_task_ids.get(client.client_id)
-                if client_task_id is None or client_task_id not in client.mask_logits:
-                    continue
-                task_loader = test_loaders[client_task_id]
-                eval_state = server.build_eval_state(client_task_id, client_id=client.client_id)
-                eval_trainer.model.load_state_dict(eval_state, strict=True)
-                local_metrics = eval_trainer.evaluate(task_loader)
-                evaluated_clients += 1
-                client_eval_samples += len(task_loader.dataset)
-                client_accuracy += float(local_metrics.get("accuracy", 0.0))
-                client_loss += float(local_metrics.get("loss", 0.0))
-            metrics = {
-                "accuracy": client_accuracy / max(1, evaluated_clients),
-                "loss": client_loss / max(1, evaluated_clients),
-                "num_eval_clients": float(evaluated_clients),
-                "num_eval_samples": float(client_eval_samples / max(1, evaluated_clients)),
-            }
-            task_metrics[eval_task_id] = metrics
-            avg_accuracy += float(metrics.get("accuracy", 0.0))
-            avg_loss += float(metrics.get("loss", 0.0))
-        avg_accuracy /= max(1, len(evaluation_groups))
-        avg_loss /= max(1, len(evaluation_groups))
-        per_task_accuracy = " ".join(
-            f"{seen_task_id}={metrics.get('accuracy', 0.0):.4f}"
-            for seen_task_id, metrics in task_metrics.items()
+    clients_by_id = {client.client_id: client for client in clients}
+
+    def _evaluate_unit(client_id: str | None, task_id: str) -> dict[str, float] | None:
+        if client_id is None:
+            return None
+        client = clients_by_id[client_id]
+        if task_id not in client.mask_logits:
+            return None
+        eval_state = server.build_eval_state(task_id, client_id=client_id)
+        eval_trainer.model.load_state_dict(eval_state, strict=True)
+        eval_trainer.model.to(device).eval()
+        return evaluate_classification(
+            test_loaders[task_id],
+            device=device,
+            predict=eval_trainer.model,
+            class_ids=None,
+            num_classes=task_num_classes,
         )
-        print(f"[eval] task={task_id} round={round_idx}: avg_acc={avg_accuracy:.4f} {per_task_accuracy}")
-        record = {
-            "type": "eval",
-            "task_id": task_id,
-            "round": round_idx,
-            "avg_metrics": {"accuracy": avg_accuracy, "loss": avg_loss},
-            "task_metrics": task_metrics,
-            "heterogeneous_eval_mode": experiment.effective_eval_mode,
-            "evaluation_task_groups": {
-                eval_task_id: client_task_ids
-                for eval_task_id, client_task_ids in evaluation_groups
-            },
-        }
-        with open(log_path, "a", encoding="utf-8") as handle:
-            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+    evaluator = HistoricalTaskEvaluator(
+        algorithm="fedweit",
+        evaluation_scope="client_average",
+        evaluate_unit=_evaluate_unit,
+        task_classes=task_classes,
+        model_source="server_shared_plus_client_adaptive_task_mask",
+    )
 
     experiment = FCLExperiment(
         server=server,
@@ -273,10 +256,10 @@ def main() -> None:
         seed=args.seed,
         log_each_round=True,
         eval_every=args.eval_every,
-        eval_fn=_eval_round if args.eval_every and args.eval_every > 0 else None,
+        eval_fn=evaluator if args.eval_every and args.eval_every > 0 else None,
         log_path=log_path,
     )
-
+    evaluator.attach_experiment(experiment, log_path)
     experiment.run()
     print("FedWeIT finished.")
 

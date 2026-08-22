@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Iterable, List, Sequence
 
 import torch
@@ -86,6 +87,56 @@ class ClassIncrementalSubset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
         if self.remap_labels:
             target_value = self.label_map[target_value]
         return sample, torch.tensor(target_value, dtype=torch.long)
+
+
+class DomainIncrementalSubset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
+    """A task view containing one visual domain with original class labels."""
+
+    def __init__(self, dataset: Dataset, indices: Sequence[int], domain: str) -> None:
+        self.dataset = dataset
+        self.indices = [int(index) for index in indices]
+        self.domain = str(domain)
+        self.remap_labels = False
+
+    def __len__(self) -> int:
+        return len(self.indices)
+
+    def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor]:
+        sample, target = self.dataset[self.indices[int(index)]][:2]
+        return sample, torch.as_tensor(target, dtype=torch.long)
+
+
+def build_domain_incremental_tasks(
+    dataset: Dataset,
+    domains: Sequence[str] | None = None,
+    num_tasks: int | None = None,
+) -> List[DomainIncrementalSubset]:
+    """Split ImagePathDataset-style samples by ``domain/class/image`` paths."""
+    current: Dataset = dataset
+    resolved_indices = list(range(len(dataset)))
+    while isinstance(current, Subset):
+        resolved_indices = [int(current.indices[index]) for index in resolved_indices]
+        current = current.dataset
+    samples = getattr(current, "samples", None)
+    if samples is None:
+        raise ValueError(
+            "Domain-incremental tasks require a folder dataset exposing `samples`; "
+            "use --scenario class for torchvision array datasets."
+        )
+    domain_indices: dict[str, list[int]] = {}
+    for local_index, source_index in enumerate(resolved_indices):
+        sample = samples[source_index]
+        path = Path(str(sample[0]))
+        if len(path.parents) < 2:
+            raise ValueError(f"Cannot infer domain from sample path: {path}")
+        domain_indices.setdefault(path.parent.parent.name, []).append(local_index)
+    order = list(domains) if domains is not None else sorted(domain_indices)
+    if num_tasks is not None and int(num_tasks) > 0:
+        order = order[: int(num_tasks)]
+    missing = [domain for domain in order if domain not in domain_indices]
+    if missing:
+        raise ValueError("Requested domains are absent from the dataset: " + ", ".join(missing))
+    return [DomainIncrementalSubset(dataset, domain_indices[domain], domain) for domain in order]
 
 
 class IndexedDataset(Dataset):

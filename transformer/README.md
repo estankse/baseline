@@ -4,3 +4,5 @@ Unlike contemporary decoder-only LLMs, the proposed translation model utilizes a
 
 To account for hardware constraints and optimize GPU utilization, a subset of 200,000 samples from the OPUS-100 dataset was selected for training. These parameters can be adjusted accordingly within the data.py
 
+# Decoder-Only Transformer Architecture
+The model also supports decoder-only architecture for large language models.
